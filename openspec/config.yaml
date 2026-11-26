@@ -1,0 +1,6 @@
+schema: spec-driven
+
+context: |
+  OpenSpec 制品正文使用简体中文，结构标题与 SHALL、MUST、WHEN、THEN 等规范关键词保留英文。
+  进行中的规格、设计与任务统一保存在 openspec/changes/<change-name>/。
+  tasks.md 中的每项任务描述一条可独立验收的端到端路径，并注明验收条件。

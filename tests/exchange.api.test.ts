@@ -36,6 +36,10 @@ interface Harness {
     payload: unknown,
     headers?: Record<string, string | undefined>
   ): Promise<LightMyRequestResponse>;
+  ask(
+    question: string,
+    headers?: Record<string, string | undefined>
+  ): Promise<LightMyRequestResponse>;
   setNow(value: number): void;
   advance(ms: number): void;
   updateSignedAt(orderId: string, value: number | null): void;
@@ -104,6 +108,14 @@ function buildHarness(
         url: '/api/exchange/confirm',
         headers: headers(extra),
         payload: payload as object
+      });
+    },
+    ask(question, extra = {}) {
+      return app.inject({
+        method: 'POST',
+        url: '/api/chat',
+        headers: headers(extra),
+        payload: { question }
       });
     },
     setNow(value) {
@@ -604,6 +616,69 @@ describe('POST /api/exchange/confirm 确认提交换货申请', () => {
         outcome: 'already_submitted',
         application: submitted.json().application
       });
+    });
+  });
+});
+
+describe('查单结果恢复换货回执', () => {
+  it('提交申请后查单返回申请编号与状态，提交前没有回执', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+
+      const before = await harness.ask(`查订单 ${orderId}`, { cookie });
+      expect(before.json()).toEqual({
+        status: 'order_query',
+        outcome: 'found',
+        order: { orderId, productName: SEED_PRODUCT, status: '已签收' }
+      });
+
+      const preview = await harness.preview(
+        { orderId, reason: 'quality', declaration: ALL_DECLARED },
+        { cookie }
+      );
+      const submitted = await harness.confirm(
+        { confirmationId: preview.json().confirmationId },
+        { cookie }
+      );
+
+      const after = await harness.ask(`查订单 ${orderId}`, { cookie });
+      expect(after.json()).toEqual({
+        status: 'order_query',
+        outcome: 'found',
+        order: { orderId, productName: SEED_PRODUCT, status: '已签收' },
+        exchange: submitted.json().application
+      });
+    });
+  });
+
+  it('其他访客查单看不到该申请，也无法查询其他订单', async () => {
+    await withHarness(async (harness) => {
+      const visitorA = await harness.claim();
+      const visitorB = await harness.claim();
+
+      const preview = await harness.preview(
+        { orderId: visitorA.orderId, reason: 'quality', declaration: ALL_DECLARED },
+        { cookie: visitorA.cookie }
+      );
+      await harness.confirm({ confirmationId: preview.json().confirmationId }, {
+        cookie: visitorA.cookie
+      });
+
+      const own = await harness.ask(`查订单 ${visitorB.orderId}`, {
+        cookie: visitorB.cookie
+      });
+      expect(own.json()).toMatchObject({ outcome: 'found' });
+      expect(own.json()).not.toHaveProperty('exchange');
+
+      const foreign = await harness.ask(`查订单 ${visitorA.orderId}`, {
+        cookie: visitorB.cookie
+      });
+      expect(foreign.json()).toEqual({
+        status: 'order_query',
+        outcome: 'not_found',
+        message: '未找到可查询的订单。'
+      });
+      expect(foreign.json()).not.toHaveProperty('exchange');
     });
   });
 });

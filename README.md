@@ -21,7 +21,13 @@ docker compose up --build -d
 2. 点击「查询示例订单」或输入 `查订单 SC-...`，结果直接显示单号、商品名和「已签收」。
 3. 只输入 `查订单` 时页面提示补充单号，下一轮直接输入该单号即可完成查询。
 
-演示会话通过 `HttpOnly` Cookie 识别，订单与会话保存在 SQLite 中。领取和问答接口按来源 IP 限制每分钟 60 次，超限返回 429。Docker Compose 使用命名卷 `shopcare-data` 挂载到 `/app/data`；`docker compose down` 会保留数据卷，重建容器后原浏览器仍可继续查询未过期的会话。需要清空演示数据时执行：
+换货演示（接在查单结果卡片上）：
+
+4. 点击「申请换货」，选择「质量问题」或「其他原因」，勾选商品现状后点击「预览换货」。
+5. 核对待确认摘要、运费说明与政策出处后点击「确认提交」，页面显示 `EX-` 开头的申请编号和「已提交」。
+6. 刷新页面后再次查询同一订单，仍会显示原申请编号；重复确认不会产生第二笔申请。
+
+演示会话通过 `HttpOnly` Cookie 识别，订单、会话、换货摘要与申请保存在 SQLite 中。领取和问答接口按来源 IP 限制每分钟 60 次，超限返回 429。Docker Compose 使用命名卷 `shopcare-data` 挂载到 `/app/data`；`docker compose down` 会保留数据卷，重建容器后原浏览器仍可继续查询未过期的会话和已提交的换货申请。需要清空演示数据时执行：
 
 ```bash
 docker compose down -v
@@ -147,7 +153,7 @@ pnpm build
 pnpm start
 ```
 
-`pnpm build` 由 Vite 生成 `dist/web`，TypeScript 编译 `dist/server`。Fastify 同源提供页面、`POST /api/chat`、`POST /api/demo/session` 与 `GET /healthz`。
+`pnpm build` 由 Vite 生成 `dist/web`，TypeScript 编译 `dist/server`。Fastify 同源提供页面、`POST /api/chat`、`POST /api/demo/session`、`POST /api/exchange/preview`、`POST /api/exchange/confirm` 与 `GET /healthz`。
 
 ## 检查
 

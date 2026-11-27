@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { exchangeApplicationSchema } from './exchange.js';
 import { faqSourceSchema } from './faq.js';
 import { demoOrderSchema } from './orders.js';
 
@@ -48,7 +49,9 @@ export const orderQueryResponseSchema = z.discriminatedUnion('outcome', [
   z.object({
     status: z.literal('order_query'),
     outcome: z.literal('found'),
-    order: demoOrderSchema
+    order: demoOrderSchema,
+    /** 已受理的换货申请；查单时一并返回，刷新页面也能恢复回执。 */
+    exchange: exchangeApplicationSchema.optional()
   }),
   z.object({
     status: z.literal('order_query'),

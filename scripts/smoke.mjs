@@ -99,6 +99,76 @@ for (const question of questions) {  await check(`带出处回答「${question}�
   });
 }
 
+async function postExchange(pathname, payload, cookie) {
+  const response = await fetch(`${baseUrl}${pathname}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(cookie ? { cookie } : {})
+    },
+    body: JSON.stringify(payload)
+  });
+  assert.equal(response.status, 200, `${pathname} 返回 ${response.status}`);
+  return response.json();
+}
+
+const declaration = {
+  itemIntact: true,
+  accessoriesComplete: true,
+  originalPackaging: true,
+  giftComplete: false
+};
+let confirmationId;
+let exchangeApplicationId;
+
+await check('预览换货资格', async () => {
+  assert.ok(demoCookie && demoOrderId, '领取示例订单未完成');
+
+  const body = await postExchange(
+    '/api/exchange/preview',
+    { orderId: demoOrderId, reason: 'quality', declaration },
+    demoCookie
+  );
+  assert.equal(body.outcome, 'eligible', `期望 eligible，实际 ${body.outcome}`);
+  assert.equal(body.summary?.orderId, demoOrderId, '预览返回了其他订单');
+  assert.ok(body.summary?.shipping?.note, '缺少运费说明');
+  assert.ok((body.summary?.sources?.length ?? 0) >= 3, '缺少政策出处');
+  confirmationId = body.confirmationId;
+});
+
+await check('确认提交换货申请并幂等重试', async () => {
+  assert.ok(confirmationId, '换货预览未完成');
+
+  const first = await postExchange(
+    '/api/exchange/confirm',
+    { confirmationId },
+    demoCookie
+  );
+  assert.equal(first.outcome, 'submitted', `期望 submitted，实际 ${first.outcome}`);
+  assert.match(first.application.applicationId, /^EX-[A-Z0-9]{12}$/, '申请编号格式不正确');
+
+  const retried = await postExchange(
+    '/api/exchange/confirm',
+    { confirmationId },
+    demoCookie
+  );
+  assert.equal(
+    retried.application.applicationId,
+    first.application.applicationId,
+    '重复确认返回了新的申请编号'
+  );
+  exchangeApplicationId = first.application.applicationId;
+});
+
+await check('查单恢复换货回执', async () => {
+  assert.ok(exchangeApplicationId, '换货申请未提交');
+
+  const body = await postQuestion(`查订单 ${demoOrderId}`, demoCookie);
+  assert.equal(body.outcome, 'found', `期望 found，实际 ${body.outcome}`);
+  assert.equal(body.exchange?.applicationId, exchangeApplicationId, '查单未返回原申请');
+  assert.equal(body.exchange?.status, 'submitted', '查单申请状态不正确');
+});
+
 if (failures.length > 0) {
   console.error(`冒烟验证失败：${failures.join('、')}`);
   process.exit(1);

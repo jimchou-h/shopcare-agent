@@ -150,6 +150,7 @@ export function App() {
               <ExchangePanel
                 key={state.response.order.orderId}
                 order={state.response.order}
+                application={state.response.exchange}
               />
             </article>
           ) : (

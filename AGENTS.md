@@ -34,8 +34,10 @@ If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is 
 src/
   web/       React 页面、交互状态和同源 HTTP 调用
     chat/    提交、取消和重试问答请求
+    exchange/ 订单卡片换货入口、预览摘要与确认提交
   server/    Fastify 启动、路由装配、业务用例和外部服务接入
     chat/    站内问答路由
+    exchange/ 换货资格、确认提交与幂等申请
     faq/     政策语料、检索与引用证据
   shared/    网页和本站 API 共同使用的请求、响应类型与校验
 tests/       通过 HTTP 或界面行为验证业务路径
@@ -44,7 +46,7 @@ openspec/    进行中的 Change 和归档后的行为规格
 
 - `src/web/` 经同源 HTTP 使用服务端。`src/shared/` 收录双方实际使用的站内契约。供应商协议和凭证配置属于服务端。
 - `src/server/index.ts` 负责启动，`src/server/app.ts` 负责应用装配。复杂问答、查单、换货和转人工按业务能力就近组织，路由负责把 HTTP 请求交给对应业务入口。
-- 改问答时，从 `src/web/App.tsx` 或 `POST /api/chat` 开始，沿站内契约找到服务端用例，再看 FAQ 或模型接入，最后对照对应测试。新增业务目录时同步更新这里的实际导航。
+- 改问答时，从 `src/web/App.tsx` 或 `POST /api/chat` 开始，沿站内契约找到服务端用例，再看 FAQ 或模型接入，最后对照对应测试。改换货时，从 `src/web/exchange/exchange-panel.tsx` 或 `POST /api/exchange/preview` 开始，沿 `src/shared/exchange.ts` 找到 `src/server/exchange/` 的资格与幂等用例，最后对照换货测试。新增业务目录时同步更新这里的实际导航。
 
 ## 注释与代码回读
 

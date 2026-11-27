@@ -75,6 +75,7 @@ function jsonResponse(body: unknown) {
 interface FetchRoutes {
   preview: (body: Record<string, unknown>) => unknown | Promise<unknown>;
   confirm?: (body: Record<string, unknown>) => unknown | Promise<unknown>;
+  chat?: ChatResponse;
 }
 
 const submittedResponse = {
@@ -89,7 +90,7 @@ function mockFetch(routes: FetchRoutes) {
       return jsonResponse(claimed);
     }
     if (url === '/api/chat') {
-      return jsonResponse(orderFound);
+      return jsonResponse(routes.chat ?? orderFound);
     }
     if (url === '/api/exchange/preview') {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
@@ -344,6 +345,20 @@ describe('顾客在订单卡片申请换货', () => {
     expect(await screen.findByTestId('exchange-application-id')).toHaveTextContent(
       'EX-AB12CD34EF56'
     );
+    expect(screen.queryByRole('button', { name: '申请换货' })).not.toBeInTheDocument();
+  });
+
+  it('重新查询已提交申请的订单时直接展示原回执', async () => {
+    const foundWithReceipt = {
+      ...orderFound,
+      exchange: { applicationId: 'EX-AB12CD34EF56', status: 'submitted' }
+    } as ChatResponse;
+    const fetchMock = mockFetch({ preview: () => eligiblePreview, chat: foundWithReceipt });
+
+    await openOrderCard(fetchMock);
+
+    expect(await screen.findByTestId('exchange-receipt')).toHaveTextContent('已提交');
+    expect(screen.getByTestId('exchange-application-id')).toHaveTextContent('EX-AB12CD34EF56');
     expect(screen.queryByRole('button', { name: '申请换货' })).not.toBeInTheDocument();
   });
 });

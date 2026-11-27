@@ -98,6 +98,12 @@ export function handleOrderQuestion(
     }
 
     deps.repository.setPending(deps.tokenHash!, false, deps.now);
+
+    // 已提交的换货申请随订单一起返回，刷新页面后仍能看到原申请编号。
+    const application = deps.repository.findExchangeApplication(
+      session.visitorId,
+      order.orderId
+    );
     return {
       status: 'order_query',
       outcome: 'found',
@@ -105,7 +111,8 @@ export function handleOrderQuestion(
         orderId: order.orderId,
         productName: order.productName,
         status: order.status
-      }
+      },
+      ...(application ? { exchange: application } : {})
     };
   }
 

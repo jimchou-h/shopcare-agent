@@ -1,5 +1,6 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { openDatabase } from '../db/database.js';
+import { createExchangeStore, type ExchangeStore } from '../exchange/store.js';
 
 /** 公开演示的会话有效期；固定 24 小时，避免公开实例长期积累身份。 */
 export const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -14,6 +15,8 @@ export interface DemoOrderRecord {
   visitorId: string;
   productName: string;
   status: string;
+  /** 签收时刻；未签收为 null。演示订单领取时即视为已签收。 */
+  signedAt: number | null;
 }
 
 export interface DemoSessionRecord {
@@ -32,7 +35,7 @@ export interface ClaimedSession {
  * 查单所需的持久化操作。HTTP 层只依赖该接口，测试可用同一实现配合可控时钟，
  * 生产实现落在 SQLite，归属判断始终由 `visitorId` 与单号共同完成。
  */
-export interface DemoRepository {
+export interface DemoRepository extends ExchangeStore {
   /** 创建或复用当前令牌的会话，并返回绑定的合成订单。 */
   claimSession(tokenHash: string, now: number): ClaimedSession;
   /** 只返回未过期会话；过期或未知令牌视为没有会话。 */
@@ -61,7 +64,8 @@ function toOrder(row: Record<string, unknown>): DemoOrderRecord {
     orderId: String(row.order_id),
     visitorId: String(row.visitor_id),
     productName: String(row.product_name),
-    status: String(row.status)
+    status: String(row.status),
+    signedAt: row.signed_at === null || row.signed_at === undefined ? null : Number(row.signed_at)
   };
 }
 
@@ -77,7 +81,7 @@ export function createSqliteDemoRepository(options: {
   const ttlMs = options.ttlMs ?? DEFAULT_SESSION_TTL_MS;
 
   const findValidOrder = db.prepare(`
-    SELECT o.order_id, o.visitor_id, o.product_name, o.status
+    SELECT o.order_id, o.visitor_id, o.product_name, o.status, o.signed_at
     FROM demo_sessions s
     JOIN demo_orders o ON o.order_id = s.order_id
     WHERE s.token_hash = ? AND s.expires_at > ?
@@ -88,12 +92,14 @@ export function createSqliteDemoRepository(options: {
     WHERE token_hash = ? AND expires_at > ?
   `);
   const findOrder = db.prepare(`
-    SELECT order_id, visitor_id, product_name, status
+    SELECT order_id, visitor_id, product_name, status, signed_at
     FROM demo_orders
     WHERE order_id = ? AND visitor_id = ?
   `);
 
   return {
+    ...createExchangeStore(db),
+
     claimSession(tokenHash, now) {
       db.exec('BEGIN IMMEDIATE');
       try {
@@ -113,8 +119,8 @@ export function createSqliteDemoRepository(options: {
           const visitorId = createVisitorId();
           try {
             db.prepare(
-              'INSERT INTO demo_orders (order_id, visitor_id, product_name, status, created_at) VALUES (?, ?, ?, ?, ?)'
-            ).run(orderId, visitorId, PRODUCT_NAME, ORDER_STATUS, now);
+              'INSERT INTO demo_orders (order_id, visitor_id, product_name, status, created_at, signed_at) VALUES (?, ?, ?, ?, ?, ?)'
+            ).run(orderId, visitorId, PRODUCT_NAME, ORDER_STATUS, now, now);
             db.prepare(
               `INSERT INTO demo_sessions
                  (token_hash, visitor_id, order_id, pending_order_query, expires_at, created_at)
@@ -126,7 +132,8 @@ export function createSqliteDemoRepository(options: {
                 orderId,
                 visitorId,
                 productName: PRODUCT_NAME,
-                status: ORDER_STATUS
+                status: ORDER_STATUS,
+                signedAt: now
               },
               created: true
             };

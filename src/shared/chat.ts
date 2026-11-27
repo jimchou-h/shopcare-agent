@@ -1,5 +1,8 @@
 import { z } from 'zod';
+import { faqSourceSchema } from './faq.js';
 import { demoOrderSchema } from './orders.js';
+
+export { faqSourceSchema };
 
 /** 问答接口的请求体。空白问题在入口处拒绝，避免绕过页面直接提交。 */
 export const chatRequestSchema = z.object({
@@ -16,17 +19,6 @@ export const chatErrorResponseSchema = z.object({
 });
 
 export type ChatErrorResponse = z.infer<typeof chatErrorResponseSchema>;
-
-/** 回答所依据的 FAQ 出处，字段来自同一条语料。 */
-export const faqSourceSchema = z.object({
-  /** 稳定条目 ID，后续换货 Flow 也用它引用政策。 */
-  id: z.string(),
-  title: z.string(),
-  /** 直接支持结论的政策原文摘录。 */
-  excerpt: z.string(),
-  /** 语料版本，便于演示环境核对回答依据。 */
-  version: z.string()
-});
 
 /** 本轮实际采用的回答来源：预置、模型生成或上游失败后的预置降级。 */
 export const chatModeSchema = z.enum(['preset', 'generated', 'fallback']);

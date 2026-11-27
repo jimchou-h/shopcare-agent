@@ -13,6 +13,8 @@ export function openDatabase(databasePath: string): DatabaseSync {
   }
 
   const db = new DatabaseSync(databasePath);
+  // 订单清理依赖级联删除，连同其换货摘要和申请一起回收。
+  db.exec('PRAGMA foreign_keys = ON');
   if (databasePath !== ':memory:') {
     db.exec('PRAGMA journal_mode = WAL');
   }

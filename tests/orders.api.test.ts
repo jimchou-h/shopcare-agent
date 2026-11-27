@@ -200,6 +200,9 @@ describe('POST /api/demo/session 领取示例订单', () => {
       findOrder() {
         return null;
       },
+      replacePreview() {
+        throw new Error('db down');
+      },
       close() {
         // 注入的替身由测试持有。
       }

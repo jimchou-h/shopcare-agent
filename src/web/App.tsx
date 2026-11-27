@@ -2,6 +2,7 @@ import { useEffect, type FormEvent } from 'react';
 import type { ChatMode } from '../shared/chat';
 import { useChat } from './chat/use-chat';
 import { useDemoSession } from './demo-session/use-demo-session';
+import { ExchangePanel } from './exchange/exchange-panel';
 
 const EXAMPLE_QUESTIONS = ['换货期限是多久？', '我收到货以后几天内还能申请换货？'];
 
@@ -146,6 +147,10 @@ export function App() {
                   <dd data-testid="order-status">{state.response.order.status}</dd>
                 </div>
               </dl>
+              <ExchangePanel
+                key={state.response.order.orderId}
+                order={state.response.order}
+              />
             </article>
           ) : (
             <article className="answer answer--guide" data-testid="order-guidance">

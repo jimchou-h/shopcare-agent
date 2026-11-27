@@ -363,6 +363,91 @@ body {
   background: var(--accent-soft);
 }
 
+.exchange {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.exchange__form {
+  display: grid;
+  gap: 14px;
+}
+
+.exchange__fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.exchange__legend {
+  padding: 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.exchange__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.exchange__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.exchange__actions .retry {
+  margin-top: 0;
+}
+
+.exchange__summary {
+  display: grid;
+  gap: 14px;
+}
+
+.exchange__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.exchange__shipping {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  color: #2b3a47;
+  background: #f7fbfa;
+}
+
+.exchange__sources {
+  display: grid;
+  gap: 10px;
+}
+
+.exchange__sources .source {
+  margin-top: 0;
+}
+
+.exchange__receipt {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 @media (max-width: 560px) {
   .page {
     padding-top: 40px;

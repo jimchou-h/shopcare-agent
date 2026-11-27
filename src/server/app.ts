@@ -7,6 +7,7 @@ import {
 } from './demo-session/repository.js';
 import { registerDemoSessionRoute } from './demo-session/route.js';
 import { createDeepSeekClient, type DeepSeekGenerator } from './deepseek/client.js';
+import { registerExchangeRoute } from './exchange/route.js';
 import { FAQ_CORPUS, FAQ_CORPUS_VERSION } from './faq/corpus.js';
 import { findCorpusProblems } from './faq/validate.js';
 import { DEFAULT_RATE_LIMIT, createRateLimiter } from './http/rate-limit.js';
@@ -94,6 +95,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   };
   const sessionRateLimiter = createRateLimiter(rateLimitOptions);
   const chatRateLimiter = createRateLimiter(rateLimitOptions);
+  const exchangeRateLimiter = createRateLimiter(rateLimitOptions);
 
   registerDemoSessionRoute(app, {
     repository,
@@ -105,6 +107,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     generate,
     repository,
     rateLimiter: chatRateLimiter,
+    now: options.now
+  });
+  registerExchangeRoute(app, {
+    repository,
+    rateLimiter: exchangeRateLimiter,
     now: options.now
   });
   return app;

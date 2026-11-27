@@ -32,6 +32,44 @@ const MIGRATIONS: readonly Migration[] = [
 
       CREATE INDEX idx_demo_sessions_expires_at ON demo_sessions(expires_at);
     `
+  },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE demo_orders ADD COLUMN signed_at INTEGER;
+
+      -- 旧种子在领取时即创建「已签收」订单，以创建时间补齐模拟签收时刻，
+      -- 保留原单号与有效会话，使升级前的演示订单仍能进入换货流程。
+      UPDATE demo_orders SET signed_at = created_at WHERE signed_at IS NULL;
+
+      CREATE TABLE exchange_summaries (
+        confirmation_id TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL,
+        visitor_id TEXT NOT NULL,
+        order_id TEXT NOT NULL REFERENCES demo_orders(order_id) ON DELETE CASCADE,
+        reason TEXT NOT NULL CHECK (reason IN ('quality', 'other')),
+        item_intact INTEGER NOT NULL CHECK (item_intact IN (0, 1)),
+        accessories_complete INTEGER NOT NULL CHECK (accessories_complete IN (0, 1)),
+        original_packaging INTEGER NOT NULL CHECK (original_packaging IN (0, 1)),
+        gift_complete INTEGER NOT NULL CHECK (gift_complete IN (0, 1)),
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        superseded_at INTEGER,
+        consumed_at INTEGER
+      ) STRICT;
+
+      CREATE INDEX idx_exchange_summaries_order_id ON exchange_summaries(order_id);
+
+      CREATE TABLE exchange_applications (
+        application_id TEXT PRIMARY KEY,
+        confirmation_id TEXT NOT NULL UNIQUE,
+        visitor_id TEXT NOT NULL,
+        order_id TEXT NOT NULL UNIQUE REFERENCES demo_orders(order_id) ON DELETE CASCADE,
+        reason TEXT NOT NULL CHECK (reason IN ('quality', 'other')),
+        status TEXT NOT NULL CHECK (status IN ('submitted')),
+        created_at INTEGER NOT NULL
+      ) STRICT;
+    `
   }
 ];
 

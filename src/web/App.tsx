@@ -1,7 +1,19 @@
 import { useEffect, type FormEvent } from 'react';
+import type { ChatMode } from '../shared/chat';
 import { useChat } from './chat/use-chat';
 
 const EXAMPLE_QUESTIONS = ['换货期限是多久？', '我收到货以后几天内还能申请换货？'];
+
+/** 页面必须让顾客看出本轮是预置、模型生成还是降级答复。 */
+function modeLabel(mode?: ChatMode): string {
+  if (mode === 'generated') {
+    return 'DeepSeek 生成';
+  }
+  if (mode === 'fallback') {
+    return '降级为预置答复';
+  }
+  return '预置演示';
+}
 
 export function App() {
   const { draft, setDraft, state, submit, retry } = useChat();
@@ -77,7 +89,9 @@ export function App() {
         {state.kind === 'pending' && <p className="hint">正在查找可支持回答的政策依据…</p>}
         {state.kind === 'result' && state.response.status === 'answered' && (
           <article className="answer">
-            <p className="answer__mode" data-testid="answer-mode">预置演示</p>
+            <p className="answer__mode" data-testid="answer-mode">
+              {modeLabel(state.response.mode)}
+            </p>
             <p className="answer__question" data-testid="answer-question">{state.question}</p>
             <p className="answer__text" data-testid="answer-text">{state.response.answer}</p>
             <div className="source" data-testid="answer-source">
@@ -93,7 +107,11 @@ export function App() {
         )}
         {state.kind === 'result' && state.response.status === 'insufficient_evidence' && (
           <article className="answer answer--guide" data-testid="insufficient">
-            <p className="answer__mode" data-testid="answer-mode">预置演示</p>
+            {state.response.mode && (
+              <p className="answer__mode" data-testid="answer-mode">
+                {modeLabel(state.response.mode)}
+              </p>
+            )}
             <p className="answer__eyebrow">需要补充信息</p>
             <p className="answer__text" data-testid="insufficient-message">
               {state.response.message}
@@ -104,7 +122,7 @@ export function App() {
           <article className="answer answer--muted" data-testid="request-failed">
             <p className="answer__eyebrow">未完成的问题</p>
             <p className="answer__failed-question" data-testid="failed-question">{state.question}</p>
-            <p className="answer__text">问答服务暂时不可用，请稍后重试。</p>
+            <p className="answer__text" data-testid="failure-message">{state.message}</p>
             <button className="retry" type="button" onClick={retry}>重试</button>
           </article>
         )}

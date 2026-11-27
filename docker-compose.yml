@@ -8,6 +8,8 @@ services:
     environment:
       PORT: "3000"
       HOST: "0.0.0.0"
+      CHAT_MODE: "${CHAT_MODE:-preset}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
     healthcheck:
       test:
         - CMD

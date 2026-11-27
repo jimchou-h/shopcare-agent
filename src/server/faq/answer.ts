@@ -1,5 +1,5 @@
 import type { ChatResponse } from '../../shared/chat.js';
-import { FAQ_CORPUS_VERSION } from './corpus.js';
+import { FAQ_CORPUS, FAQ_CORPUS_VERSION, type FaqEntry } from './corpus.js';
 import { retrieveFaq } from './retrieve.js';
 
 /**
@@ -9,8 +9,11 @@ import { retrieveFaq } from './retrieve.js';
  * 保证页面上看到的引用能直接核对。无匹配或最高分并列时不下政策结论、不附引用，
  * 只返回引导顾客补充信息的文案。
  */
-export function answerQuestion(question: string): ChatResponse {
-  const result = retrieveFaq(question);
+export function answerQuestion(
+  question: string,
+  corpus: readonly FaqEntry[] = FAQ_CORPUS
+): ChatResponse {
+  const result = retrieveFaq(question, corpus);
 
   if (result.status === 'none') {
     return {

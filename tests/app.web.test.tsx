@@ -183,6 +183,54 @@ describe('顾客问答页面', () => {
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
   });
 
+  it('展示服务端返回的可重试错误文案', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 502,
+        json: async () => ({
+          status: 'upstream_error',
+          message: '生成服务暂时不可用，请稍后重试。'
+        })
+      })
+    );
+
+    render(<App />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText('你的问题'), '换货期限是多久？');
+    await user.click(screen.getByRole('button', { name: '查询' }));
+
+    expect(await screen.findByTestId('failure-message')).toHaveTextContent(
+      '生成服务暂时不可用，请稍后重试。'
+    );
+    expect(screen.queryByTestId('answer-source')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { mode: 'generated', label: 'DeepSeek 生成', answer: '模型生成的换货期限正文。' },
+    { mode: 'fallback', label: '降级为预置答复', answer: answered.answer }
+  ])('回答来源标记为「$label」', async ({ mode, label, answer }) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ...answered, answer, mode })
+      })
+    );
+
+    render(<App />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText('你的问题'), '换货期限是多久？');
+    await user.click(screen.getByRole('button', { name: '查询' }));
+
+    expect(await screen.findByTestId('answer-mode')).toHaveTextContent(label);
+    expect(screen.getByTestId('answer-text')).toHaveTextContent(answer);
+    expect(screen.getByTestId('source-title')).toHaveTextContent(answered.source.title);
+  });
+
   it('编辑草稿不会改变旧回答对应的问题', async () => {
     vi.stubGlobal(
       'fetch',

@@ -25,6 +25,8 @@ describe('GET /healthz', () => {
     expect(csp).toContain("script-src 'self'");
     expect(csp?.split('; ')).toContain("connect-src 'self'");
     expect(csp).not.toContain('*');
+    // 模型调用只在服务端发生，浏览器不应获得 DeepSeek 直连权限。
+    expect(csp).not.toContain('api.deepseek.com');
   });
 });
 

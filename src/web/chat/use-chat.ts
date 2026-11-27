@@ -1,12 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { chatResponseSchema, type ChatResponse } from '../../shared/chat';
+import {
+  chatErrorResponseSchema,
+  chatResponseSchema,
+  type ChatResponse
+} from '../../shared/chat';
 
 type ChatState =
   | { kind: 'idle' }
   | { kind: 'invalid' }
   | { kind: 'pending' }
   | { kind: 'result'; question: string; response: ChatResponse }
-  | { kind: 'failed'; question: string };
+  | { kind: 'failed'; question: string; message: string };
+
+const DEFAULT_FAILURE_MESSAGE = '问答服务暂时不可用，请稍后重试。';
+
+/** 只携带服务端应用文案，避免把网络异常等技术细节直接展示给顾客。 */
+class ChatRequestError extends Error {}
 
 /** 提交、编辑草稿和重试是独立操作，结果始终与实际提交的问题对应。 */
 export function useChat() {
@@ -36,7 +45,16 @@ export function useChat() {
         signal: controller.signal
       });
       if (!response.ok) {
-        throw new Error('问答接口暂时不可用');
+        let message = DEFAULT_FAILURE_MESSAGE;
+        try {
+          const error = chatErrorResponseSchema.safeParse(await response.json());
+          if (error.success) {
+            message = error.data.message;
+          }
+        } catch {
+          // 响应体不是约定的错误结构时保留通用文案。
+        }
+        throw new ChatRequestError(message);
       }
 
       const parsed = chatResponseSchema.parse(await response.json());
@@ -44,9 +62,13 @@ export function useChat() {
       if (!controller.signal.aborted) {
         setState({ kind: 'result', question: submittedQuestion, response: parsed });
       }
-    } catch {
+    } catch (error) {
       if (!controller.signal.aborted) {
-        setState({ kind: 'failed', question: submittedQuestion });
+        setState({
+          kind: 'failed',
+          question: submittedQuestion,
+          message: error instanceof ChatRequestError ? error.message : DEFAULT_FAILURE_MESSAGE
+        });
       }
     } finally {
       if (activeRequest.current === controller) {

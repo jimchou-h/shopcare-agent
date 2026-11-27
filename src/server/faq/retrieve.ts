@@ -14,6 +14,17 @@ export function normalizeQuestion(input: string): string {
 const CLAUSE_SEPARATOR = /[，,。.；;！!？?、\r\n]+/u;
 
 /**
+ * 把问题切成规范化后的分句。语义候选的主题判断也复用它，
+ * 保证"主题词与关键词必须在同一分句命中"和"不得跨分句拼接主题"使用同一口径。
+ */
+export function splitQuestionClauses(question: string): string[] {
+  return question
+    .split(CLAUSE_SEPARATOR)
+    .map(normalizeQuestion)
+    .filter((clause) => clause.length > 0);
+}
+
+/**
  * 在单个分句内匹配主题词和具体关键词，只有整体能唯一对应一个条目时才回答。
  *
  * 主题词（换货/退货）只决定条目的适用方向，单独命中不足以支持政策结论；
@@ -26,10 +37,7 @@ export function retrieveFaq(
   question: string,
   corpus: readonly FaqEntry[] = FAQ_CORPUS
 ): RetrievalResult {
-  const clauses = question
-    .split(CLAUSE_SEPARATOR)
-    .map(normalizeQuestion)
-    .filter((clause) => clause.length > 0);
+  const clauses = splitQuestionClauses(question);
 
   if (clauses.length === 0) {
     return { status: 'none' };

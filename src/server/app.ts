@@ -1,5 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerChatRoute } from './chat/route.js';
+import { ConfigError, type ServerConfig } from './config.js';
+import { createDeepSeekClient, type DeepSeekGenerator } from './deepseek/client.js';
 import { FAQ_CORPUS, FAQ_CORPUS_VERSION } from './faq/corpus.js';
 import { findCorpusProblems } from './faq/validate.js';
 
@@ -17,12 +19,28 @@ const CONTENT_SECURITY_POLICY = [
   "frame-ancestors 'none'"
 ].join('; ');
 
+export interface BuildAppOptions {
+  /** 部署模式；测试可直接注入，生产由 index.ts 从环境变量解析。 */
+  config?: ServerConfig;
+  /** 受控替身；未提供且处于真实模式时使用官方客户端。 */
+  generate?: DeepSeekGenerator;
+}
+
 /**
  * 创建 Fastify 应用。测试直接调用 `inject` 验证 HTTP 行为，
  * 生产入口只在返回的实例上补充静态资源注册。
  */
-export function buildApp(): FastifyInstance {
+export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
+  const config = options.config ?? { chatMode: 'preset' };
   const app = Fastify({ logger: false });
+
+  let generate = options.generate;
+  if (config.chatMode === 'deepseek' && !generate) {
+    if (!config.deepseekApiKey) {
+      throw new ConfigError('真实模式缺少必填环境变量 DEEPSEEK_API_KEY。');
+    }
+    generate = createDeepSeekClient({ apiKey: config.deepseekApiKey });
+  }
 
   app.addHook('onSend', async (_request, reply, payload) => {
     reply.header('content-security-policy', CONTENT_SECURITY_POLICY);
@@ -44,6 +62,6 @@ export function buildApp(): FastifyInstance {
     };
   });
 
-  registerChatRoute(app);
+  registerChatRoute(app, { mode: config.chatMode, generate });
   return app;
 }

@@ -38,6 +38,7 @@ await check('问答页面同源可访问', async () => {
   assert.equal(response.status, 200, `页面返回 ${response.status}`);
   const html = await response.text();
   assert.ok(html.includes('ShopCare 售后助手'), '页面缺少标题');
+  assert.ok(!html.includes('DEEPSEEK_API_KEY'), '页面不应暴露服务端配置变量');
 });
 
 let reference;

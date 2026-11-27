@@ -10,11 +10,13 @@ export const chatRequestSchema = z.object({
 
 export type ChatRequest = z.infer<typeof chatRequestSchema>;
 
-/** 请求无法处理时返回的稳定错误码，与业务结果区分。 */
-export interface ChatErrorResponse {
-  status: 'invalid_request';
-  message: string;
-}
+/** 请求无法处理或生成服务不可用时返回的稳定错误码，与业务结果区分。 */
+export const chatErrorResponseSchema = z.object({
+  status: z.enum(['invalid_request', 'upstream_error']),
+  message: z.string()
+});
+
+export type ChatErrorResponse = z.infer<typeof chatErrorResponseSchema>;
 
 /** 回答所依据的 FAQ 出处，字段来自同一条语料。 */
 export const faqSourceSchema = z.object({
@@ -29,21 +31,24 @@ export const faqSourceSchema = z.object({
 
 export type FaqSource = z.infer<typeof faqSourceSchema>;
 
-// 可选字段兼容已经归档的问答契约。当前服务返回显式的预置来源。
-const chatModeSchema = z.literal('preset').optional();
+/** 本轮实际采用的回答来源：预置、模型生成或上游失败后的预置降级。 */
+export const chatModeSchema = z.enum(['preset', 'generated', 'fallback']);
 
+export type ChatMode = z.infer<typeof chatModeSchema>;
+
+// 字段保持可选，兼容已经归档的问答契约；当前服务在回答中显式返回来源。
 const answeredChatResponseSchema = z.object({
   status: z.literal('answered'),
   answer: z.string(),
   source: faqSourceSchema,
-  mode: chatModeSchema
+  mode: chatModeSchema.optional()
 });
 
 /** 证据不足时只返回引导文案，不携带任何政策结论或引用。 */
 const insufficientEvidenceResponseSchema = z.object({
   status: z.literal('insufficient_evidence'),
   message: z.string(),
-  mode: chatModeSchema
+  mode: chatModeSchema.optional()
 });
 
 /**

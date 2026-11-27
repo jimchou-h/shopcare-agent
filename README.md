@@ -1,6 +1,6 @@
 # ShopCare Agent
 
-可部署的电商售后演示。顾客在网页提交中文售后问题，得到带政策出处的回答，证据不足时可补充信息。公开演示默认使用合成 FAQ 语料和确定性关键词检索，无需模型 Key；受控实例可由部署者在服务端启用 DeepSeek 生成。
+可部署的电商售后演示。顾客在网页提交中文售后问题，得到带政策出处的回答，证据不足时可补充信息；也可以领取一笔合成示例订单，在同一个输入框查询订单状态。公开演示默认使用合成 FAQ 语料和确定性关键词检索，无需模型 Key；受控实例可由部署者在服务端启用 DeepSeek 生成。
 
 ## 容器启动（推荐验收方式）
 
@@ -15,9 +15,21 @@ docker compose up --build -d
 - 问答页面：<http://localhost:3000>
 - 就绪端点：<http://localhost:3000/healthz>，语料有效时返回 `{"status":"ok","faq":{...}}`
 
+查单演示：
+
+1. 点击「领取示例订单」，页面会显示服务端绑定的示例单号。
+2. 点击「查询示例订单」或输入 `查订单 SC-...`，结果直接显示单号、商品名和「已签收」。
+3. 只输入 `查订单` 时页面提示补充单号，下一轮直接输入该单号即可完成查询。
+
+演示会话通过 `HttpOnly` Cookie 识别，订单与会话保存在 SQLite 中。Docker Compose 使用命名卷 `shopcare-data` 挂载到 `/app/data`；`docker compose down` 会保留数据卷，重建容器后原浏览器仍可继续查询未过期的会话。需要清空演示数据时执行：
+
+```bash
+docker compose down -v
+```
+
 若本机 3000 端口已被占用，可改用 `APP_PORT=3100 docker compose up --build -d`，并把下文地址中的端口相应替换为 3100。
 
-用仓库内冒烟脚本核对就绪、页面和两种等价问法的出处：
+用仓库内冒烟脚本核对就绪、页面、示例订单领取、查单和政策出处：
 
 ```bash
 pnpm smoke
@@ -118,6 +130,8 @@ docker compose up --build -d
 
 ## 本地开发
 
+需要 Node.js 24：服务端使用内置 `node:sqlite` 保存演示会话和订单。默认数据库文件是 `data/shopcare.sqlite`（已被 `.gitignore` 忽略），可用 `DATABASE_PATH` 覆盖。
+
 ```bash
 pnpm install
 pnpm dev
@@ -133,7 +147,7 @@ pnpm build
 pnpm start
 ```
 
-`pnpm build` 由 Vite 生成 `dist/web`，TypeScript 编译 `dist/server`。Fastify 同源提供页面、`POST /api/chat` 与 `GET /healthz`。
+`pnpm build` 由 Vite 生成 `dist/web`，TypeScript 编译 `dist/server`。Fastify 同源提供页面、`POST /api/chat`、`POST /api/demo/session` 与 `GET /healthz`。
 
 ## 检查
 

@@ -16,6 +16,8 @@ RUN npm install -g pnpm@10.26.2
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --prod --frozen-lockfile
 COPY --from=build /app/dist ./dist
+# 数据目录必须在镜像内先由 node 用户拥有，命名卷首次挂载时会继承该权限。
+RUN mkdir -p /app/data && chown node:node /app/data
 USER node
 EXPOSE 3000
 CMD ["node", "dist/server/index.js"]

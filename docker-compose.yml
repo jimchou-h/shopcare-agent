@@ -10,6 +10,10 @@ services:
       HOST: "0.0.0.0"
       CHAT_MODE: "${CHAT_MODE:-preset}"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      DATABASE_PATH: "/app/data/shopcare.sqlite"
+    volumes:
+      # 命名卷保存演示会话、订单和待补状态；重建容器不会丢失。
+      - shopcare-data:/app/data
     healthcheck:
       test:
         - CMD
@@ -20,3 +24,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+
+volumes:
+  shopcare-data:

@@ -15,10 +15,13 @@ async function check(name, run) {
   }
 }
 
-async function postQuestion(question) {
+async function postQuestion(question, cookie) {
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(cookie ? { cookie } : {})
+    },
     body: JSON.stringify({ question })
   });
   assert.equal(response.status, 200, `问答接口返回 ${response.status}`);
@@ -41,9 +44,43 @@ await check('问答页面同源可访问', async () => {
   assert.ok(!html.includes('DEEPSEEK_API_KEY'), '页面不应暴露服务端配置变量');
 });
 
+let demoCookie;
+let demoOrderId;
+
+await check('领取示例订单', async () => {
+  const response = await fetch(`${baseUrl}/api/demo/session`, { method: 'POST' });
+  assert.equal(response.status, 200, `领取接口返回 ${response.status}`);
+
+  const setCookie = response.headers.getSetCookie?.()[0] ?? response.headers.get('set-cookie');
+  assert.ok(setCookie, '领取响应缺少演示会话 Cookie');
+  demoCookie = setCookie.split(';')[0];
+
+  const body = await response.json();
+  assert.equal(body.status, 'claimed', `期望 claimed，实际 ${body.status}`);
+  assert.match(body.order.orderId, /^SC-[A-Z0-9]{12}$/, '示例单号格式不正确');
+  assert.equal(body.order.status, '已签收', '示例订单应为已签收');
+  assert.ok(body.order.productName, '缺少商品名');
+  demoOrderId = body.order.orderId;
+});
+
+await check('查单与下一轮补单号', async () => {
+  assert.ok(demoCookie && demoOrderId, '领取示例订单未完成');
+
+  const direct = await postQuestion(`查订单 ${demoOrderId}`, demoCookie);
+  assert.equal(direct.status, 'order_query', `期望 order_query，实际 ${direct.status}`);
+  assert.equal(direct.outcome, 'found', `期望 found，实际 ${direct.outcome}`);
+  assert.equal(direct.order.orderId, demoOrderId, '查单返回了其他订单');
+
+  const prompt = await postQuestion('查订单', demoCookie);
+  assert.equal(prompt.outcome, 'number_required', `期望 number_required，实际 ${prompt.outcome}`);
+
+  const followUp = await postQuestion(demoOrderId, demoCookie);
+  assert.equal(followUp.outcome, 'found', `补单号后期望 found，实际 ${followUp.outcome}`);
+  assert.equal(followUp.order.orderId, demoOrderId, '补单号返回了其他订单');
+});
+
 let reference;
-for (const question of questions) {
-  await check(`带出处回答「${question}」`, async () => {
+for (const question of questions) {  await check(`带出处回答「${question}」`, async () => {
     const body = await postQuestion(question);
     assert.equal(body.status, 'answered', `期望 answered，实际 ${body.status}`);
     assert.equal(body.mode, 'preset', `期望预置来源，实际 ${body.mode}`);

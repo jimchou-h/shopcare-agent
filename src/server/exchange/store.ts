@@ -33,6 +33,25 @@ export interface ConfirmExchangeInput {
   now: number;
 }
 
+/** 对话内办理进度；每位访客同时只有一段，`confirmation` 阶段持有待确认摘要。 */
+export type ExchangeFlowStep = 'reason' | 'declaration' | 'confirmation';
+
+export interface ExchangeFlowRecord {
+  visitorId: string;
+  orderId: string;
+  step: ExchangeFlowStep;
+  reason: ExchangeReason | null;
+  declaration: ExchangeDeclaration;
+  confirmationId: string | null;
+  expiresAt: number | null;
+}
+
+export interface StartExchangeFlowInput {
+  visitorId: string;
+  orderId: string;
+  now: number;
+}
+
 /** 确认结果；只有 `submitted` 产生了或复用了已写入的申请。 */
 export type ConfirmExchangeResult =
   | { outcome: 'submitted'; application: ExchangeApplicationRecord }
@@ -56,8 +75,36 @@ export interface ExchangeStore {
    * 在同一事务中复核摘要、订单归属与当前资格，再写入申请。
    *
    * 确认标识是幂等键：同一确认重复或并发提交返回原申请；同一订单只保留一笔申请。
+   * 提交成功后清除该访客的办理进度。
    */
   confirmExchange(input: ConfirmExchangeInput): ConfirmExchangeResult;
+  /** 从原因步骤重新开始一段办理；已有进度会被重置，仍绑定当前访客的订单。 */
+  startFlow(input: StartExchangeFlowInput): void;
+  /** 读取当前访客的办理进度；不存在时返回 null。 */
+  findFlow(visitorId: string): ExchangeFlowRecord | null;
+  /** 记录换货原因并进入商品申报步骤。 */
+  setFlowReason(visitorId: string, reason: ExchangeReason, now: number): void;
+  /** 保存商品申报；步骤保持为申报，直到生成摘要。 */
+  setFlowDeclaration(
+    visitorId: string,
+    declaration: ExchangeDeclaration,
+    now: number
+  ): void;
+  /** 摘要生成后进入确认步骤，并记录摘要有效期供恢复时展示。 */
+  setFlowConfirmation(
+    visitorId: string,
+    confirmationId: string,
+    expiresAt: number,
+    now: number
+  ): void;
+  /** 只删除办理进度，不影响任何摘要；用于已提交后清理遗留状态。 */
+  clearFlow(visitorId: string): void;
+  /**
+   * 取消办理：撤销该访客尚未使用的摘要并删除进度。
+   *
+   * 返回是否存在可取消的进度，便于接口区分「已取消」与「本就未办理」。
+   */
+  cancelFlow(visitorId: string, now: number): boolean;
 }
 
 /** 申请编号的字符集，去掉易混淆的 I、O、0、1。 */
@@ -76,6 +123,26 @@ function toApplication(row: Record<string, unknown>): ExchangeApplicationRecord 
   return {
     applicationId: String(row.application_id),
     status: 'submitted'
+  };
+}
+
+function toFlow(row: Record<string, unknown>): ExchangeFlowRecord {
+  return {
+    visitorId: String(row.visitor_id),
+    orderId: String(row.order_id),
+    step: String(row.step) as ExchangeFlowStep,
+    reason: row.reason === null || row.reason === undefined ? null : (String(row.reason) as ExchangeReason),
+    declaration: {
+      itemIntact: Number(row.item_intact) === 1,
+      accessoriesComplete: Number(row.accessories_complete) === 1,
+      originalPackaging: Number(row.original_packaging) === 1,
+      giftComplete: Number(row.gift_complete) === 1
+    },
+    confirmationId:
+      row.confirmation_id === null || row.confirmation_id === undefined
+        ? null
+        : String(row.confirmation_id),
+    expiresAt: row.expires_at === null || row.expires_at === undefined ? null : Number(row.expires_at)
   };
 }
 
@@ -106,6 +173,13 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
   `);
   const findOrderState = db.prepare(`
     SELECT visitor_id, signed_at FROM demo_orders WHERE order_id = ?
+  `);
+  const findFlowRow = db.prepare(`
+    SELECT visitor_id, order_id, step, reason,
+           item_intact, accessories_complete, original_packaging, gift_complete,
+           confirmation_id, expires_at
+    FROM exchange_flows
+    WHERE visitor_id = ?
   `);
 
   return {
@@ -237,6 +311,9 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
           'UPDATE exchange_summaries SET consumed_at = ? WHERE confirmation_id = ?'
         ).run(input.now, input.confirmationId);
 
+        // 已提交后不再保留对话办理进度；恢复时直接返回已受理的申请。
+        db.prepare('DELETE FROM exchange_flows WHERE visitor_id = ?').run(input.visitorId);
+
         db.exec('COMMIT');
         return { outcome: 'submitted', application: { applicationId, status: 'submitted' } };
       } catch (error) {
@@ -257,6 +334,86 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
           }
         }
 
+        throw error;
+      }
+    },
+
+    startFlow(input) {
+      // 同一访客重新发起时重置已有进度，但始终绑定当前会话的订单。
+      db.prepare(
+        `INSERT INTO exchange_flows (visitor_id, order_id, step, updated_at)
+         VALUES (?, ?, 'reason', ?)
+         ON CONFLICT(visitor_id) DO UPDATE SET
+           order_id = excluded.order_id,
+           step = 'reason',
+           reason = NULL,
+           item_intact = 0,
+           accessories_complete = 0,
+           original_packaging = 0,
+           gift_complete = 0,
+           confirmation_id = NULL,
+           expires_at = NULL,
+           updated_at = excluded.updated_at`
+      ).run(input.visitorId, input.orderId, input.now);
+    },
+
+    findFlow(visitorId) {
+      const row = findFlowRow.get(visitorId);
+      return row ? toFlow(row) : null;
+    },
+
+    setFlowReason(visitorId, reason, now) {
+      db.prepare(
+        `UPDATE exchange_flows
+            SET step = 'declaration', reason = ?, confirmation_id = NULL,
+                expires_at = NULL, updated_at = ?
+          WHERE visitor_id = ?`
+      ).run(reason, now, visitorId);
+    },
+
+    setFlowDeclaration(visitorId, declaration, now) {
+      db.prepare(
+        `UPDATE exchange_flows
+            SET item_intact = ?, accessories_complete = ?, original_packaging = ?,
+                gift_complete = ?, updated_at = ?
+          WHERE visitor_id = ?`
+      ).run(
+        toSqliteBoolean(declaration.itemIntact),
+        toSqliteBoolean(declaration.accessoriesComplete),
+        toSqliteBoolean(declaration.originalPackaging),
+        toSqliteBoolean(declaration.giftComplete),
+        now,
+        visitorId
+      );
+    },
+
+    setFlowConfirmation(visitorId, confirmationId, expiresAt, now) {
+      db.prepare(
+        `UPDATE exchange_flows
+            SET step = 'confirmation', confirmation_id = ?, expires_at = ?, updated_at = ?
+          WHERE visitor_id = ?`
+      ).run(confirmationId, expiresAt, now, visitorId);
+    },
+
+    clearFlow(visitorId) {
+      db.prepare('DELETE FROM exchange_flows WHERE visitor_id = ?').run(visitorId);
+    },
+
+    cancelFlow(visitorId, now) {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const existing = findFlowRow.get(visitorId);
+        // 撤销该访客所有尚未使用或替换的摘要，旧确认按钮因此无法再提交。
+        db.prepare(
+          `UPDATE exchange_summaries
+              SET superseded_at = ?
+            WHERE visitor_id = ? AND superseded_at IS NULL AND consumed_at IS NULL`
+        ).run(now, visitorId);
+        db.prepare('DELETE FROM exchange_flows WHERE visitor_id = ?').run(visitorId);
+        db.exec('COMMIT');
+        return Boolean(existing);
+      } catch (error) {
+        db.exec('ROLLBACK');
         throw error;
       }
     }

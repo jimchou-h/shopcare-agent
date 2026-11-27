@@ -53,6 +53,16 @@ function findSession(deps: OrderQuestionDeps): DemoSessionRecord | null {
   return deps.tokenHash ? deps.repository.findSession(deps.tokenHash, deps.now) : null;
 }
 
+/** 是否包含明确的查单问法；对话内换货用它识别需要互斥的查单请求。 */
+export function hasOrderQueryPhrase(question: string): boolean {
+  return QUERY_PHRASES.some((phrase) => question.includes(phrase));
+}
+
+/** 是否包含演示单号形态；带单号的查单可以和换货办理同时进行。 */
+export function containsOrderToken(question: string): boolean {
+  return /\bSC-[A-Za-z0-9]*/i.test(question);
+}
+
 /**
  * 识别并处理一轮查单意图。
  *

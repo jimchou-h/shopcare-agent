@@ -55,7 +55,7 @@ const DECLARATION_FIELDS: Array<{ field: keyof ExchangeDeclaration; label: strin
   { field: 'giftComplete', label: '赠品齐全（如订单含赠品）' }
 ];
 
-function SourceList({ sources }: { sources: FaqSource[] }) {
+export function SourceList({ sources }: { sources: FaqSource[] }) {
   return (
     <div className="exchange__sources" data-testid="exchange-sources">
       <p className="source__heading">政策依据</p>
@@ -72,7 +72,7 @@ function SourceList({ sources }: { sources: FaqSource[] }) {
   );
 }
 
-function ApplicationReceipt({ application }: { application: ExchangeApplication }) {
+export function ApplicationReceipt({ application }: { application: ExchangeApplication }) {
   return (
     <p className="exchange__receipt" data-testid="exchange-receipt">
       换货申请已提交 · <span data-testid="exchange-application-id">{application.applicationId}</span>

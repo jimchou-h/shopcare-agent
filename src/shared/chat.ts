@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { exchangeApplicationSchema } from './exchange.js';
+import {
+  exchangeApplicationSchema,
+  exchangeIneligibleReasonSchema,
+  exchangeReasonSchema,
+  exchangeSummarySchema
+} from './exchange.js';
 import { faqSourceSchema } from './faq.js';
 import { demoOrderSchema } from './orders.js';
 
@@ -68,6 +73,75 @@ export const orderQueryResponseSchema = z.discriminatedUnion('outcome', [
 ]);
 
 /**
+ * 对话内办理换货由服务端状态机推进，页面只展示当前步骤、摘要或结果。
+ * 摘要复用与预览接口相同的结构与确认标识，提交仍走 `/api/exchange/confirm`。
+ */
+const exchangeFlowBase = { status: z.literal('exchange_flow') } as const;
+
+const exchangeFlowStepSchema = z.object({
+  ...exchangeFlowBase,
+  outcome: z.literal('step'),
+  step: z.enum(['reason', 'declaration']),
+  orderId: z.string(),
+  message: z.string(),
+  reason: exchangeReasonSchema.optional(),
+  options: z.array(z.string())
+});
+
+const exchangeFlowSummarySchema = z.object({
+  ...exchangeFlowBase,
+  outcome: z.literal('summary'),
+  confirmationId: z.string(),
+  expiresAt: z.number().int(),
+  summary: exchangeSummarySchema
+});
+
+const exchangeFlowIneligibleSchema = z.object({
+  ...exchangeFlowBase,
+  outcome: z.literal('ineligible'),
+  reason: exchangeIneligibleReasonSchema,
+  message: z.string(),
+  sources: z.array(faqSourceSchema)
+});
+
+const exchangeFlowAlreadySubmittedSchema = z.object({
+  ...exchangeFlowBase,
+  outcome: z.literal('already_submitted'),
+  application: exchangeApplicationSchema,
+  message: z.string()
+});
+
+const exchangeFlowCancelledSchema = z.object({
+  ...exchangeFlowBase,
+  outcome: z.literal('cancelled'),
+  message: z.string()
+});
+
+const exchangeFlowNoticeSchema = z.object({
+  ...exchangeFlowBase,
+  outcome: z.literal('notice'),
+  message: z.string()
+});
+
+const exchangeFlowSessionRequiredSchema = z.object({
+  ...exchangeFlowBase,
+  outcome: z.literal('session_required'),
+  message: z.string()
+});
+
+export const exchangeFlowResponseSchema = z.discriminatedUnion('outcome', [
+  exchangeFlowStepSchema,
+  exchangeFlowSummarySchema,
+  exchangeFlowIneligibleSchema,
+  exchangeFlowAlreadySubmittedSchema,
+  exchangeFlowCancelledSchema,
+  exchangeFlowNoticeSchema,
+  exchangeFlowSessionRequiredSchema
+]);
+
+export type ExchangeFlowResponse = z.infer<typeof exchangeFlowResponseSchema>;
+
+/**
  * 问答接口的响应契约，页面也用它在渲染前校验外部输入。
  * 只有结构完整时才进入对应渲染分支，避免异常响应在渲染出处或订单时崩溃。
  * 查单结果本身按 `outcome` 判别，这里用普通联合承载它与政策回答。
@@ -75,7 +149,8 @@ export const orderQueryResponseSchema = z.discriminatedUnion('outcome', [
 export const chatResponseSchema = z.union([
   answeredChatResponseSchema,
   insufficientEvidenceResponseSchema,
-  orderQueryResponseSchema
+  orderQueryResponseSchema,
+  exchangeFlowResponseSchema
 ]);
 
 export type ChatResponse = z.infer<typeof chatResponseSchema>;

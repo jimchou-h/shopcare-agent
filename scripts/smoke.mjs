@@ -63,6 +63,23 @@ await check('领取示例订单', async () => {
   demoOrderId = body.order.orderId;
 });
 
+await check('对话内发起并取消换货', async () => {
+  assert.ok(demoCookie && demoOrderId, '领取示例订单未完成');
+
+  const start = await postQuestion('我想换货', demoCookie);
+  assert.equal(start.status, 'exchange_flow', `期望 exchange_flow，实际 ${start.status}`);
+  assert.equal(start.outcome, 'step', `期望 step，实际 ${start.outcome}`);
+  assert.equal(start.step, 'reason', `期望 reason 步骤，实际 ${start.step}`);
+  assert.equal(start.orderId, demoOrderId, '换货办理绑定了其他订单');
+
+  const reason = await postQuestion('质量问题', demoCookie);
+  assert.equal(reason.step, 'declaration', `期望 declaration，实际 ${reason.step}`);
+  assert.equal(reason.reason, 'quality', `期望 quality，实际 ${reason.reason}`);
+
+  const cancel = await postQuestion('取消换货', demoCookie);
+  assert.equal(cancel.outcome, 'cancelled', `期望 cancelled，实际 ${cancel.outcome}`);
+});
+
 await check('查单与下一轮补单号', async () => {
   assert.ok(demoCookie && demoOrderId, '领取示例订单未完成');
 
@@ -167,6 +184,15 @@ await check('查单恢复换货回执', async () => {
   assert.equal(body.outcome, 'found', `期望 found，实际 ${body.outcome}`);
   assert.equal(body.exchange?.applicationId, exchangeApplicationId, '查单未返回原申请');
   assert.equal(body.exchange?.status, 'submitted', '查单申请状态不正确');
+});
+
+await check('已提交后继续换货直接返回回执', async () => {
+  assert.ok(exchangeApplicationId, '换货申请未提交');
+
+  const body = await postQuestion('继续换货', demoCookie);
+  assert.equal(body.status, 'exchange_flow', `期望 exchange_flow，实际 ${body.status}`);
+  assert.equal(body.outcome, 'already_submitted', `期望 already_submitted，实际 ${body.outcome}`);
+  assert.equal(body.application.applicationId, exchangeApplicationId, '继续换货返回了其他申请');
 });
 
 if (failures.length > 0) {

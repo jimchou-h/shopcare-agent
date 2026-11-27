@@ -14,3 +14,17 @@ export const EXCHANGE_MESSAGES = {
   forbidden: '请求来源不受信任。',
   invalidRequest: '请求格式不正确。'
 } as const;
+
+/** 对话内办理换货的步骤与提示文案；与接口结果一起返回给页面。 */
+export const EXCHANGE_FLOW_MESSAGES = {
+  reasonStep: '请选择换货原因：回复「质量问题」或「其他原因」。',
+  reasonUnknown: '未识别到换货原因，请回复「质量问题」或「其他原因」。',
+  declarationStep: '请确认商品现状：回复「都齐全」，或说明商品、配件或包装的缺失情况。',
+  declarationUnknown: '请回复「都齐全」，或说明商品、配件或包装的缺失情况。',
+  confirmHint: '请点击摘要中的「确认提交」按钮完成申请。若需结束本次办理，请回复「取消换货」。',
+  cancelled: '已取消本次换货办理，未提交的确认摘要已作废。',
+  noActiveFlow: '当前没有待继续或可取消的换货办理。',
+  orderQueryConflict: '正在办理换货，请先完成换货或回复「取消换货」，再查询订单。',
+  sessionRequired: '请先领取示例订单，再办理换货。',
+  alreadySubmitted: '该订单已有换货申请，无需重复办理。'
+} as const;

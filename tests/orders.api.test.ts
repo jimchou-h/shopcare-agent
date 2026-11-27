@@ -209,6 +209,27 @@ describe('POST /api/demo/session 领取示例订单', () => {
       confirmExchange() {
         throw new Error('db down');
       },
+      startFlow() {
+        throw new Error('db down');
+      },
+      findFlow() {
+        return null;
+      },
+      setFlowReason() {
+        throw new Error('db down');
+      },
+      setFlowDeclaration() {
+        throw new Error('db down');
+      },
+      setFlowConfirmation() {
+        throw new Error('db down');
+      },
+      clearFlow() {
+        // 该测试只验证领取失败。
+      },
+      cancelFlow() {
+        return false;
+      },
       close() {
         // 注入的替身由测试持有。
       }

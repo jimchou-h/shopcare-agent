@@ -62,23 +62,31 @@ export type ExchangeIneligibleReason = z.infer<typeof exchangeIneligibleReasonSc
 
 const exchangePreviewBase = { status: z.literal('exchange_preview') } as const;
 
+/** 运费承担方与说明；页面和对话消息共用同一结构。 */
+export const exchangeShippingSchema = z.object({
+  borneBy: z.enum(['merchant', 'customer']),
+  note: z.string()
+});
+
+/** 待确认的换货申请摘要；对话内办理与预览接口返回同一结构。 */
+export const exchangeSummarySchema = z.object({
+  orderId: z.string(),
+  productName: z.string(),
+  reason: exchangeReasonSchema,
+  reasonLabel: z.string(),
+  shipping: exchangeShippingSchema,
+  sources: z.array(faqSourceSchema)
+});
+
+export type ExchangeSummary = z.infer<typeof exchangeSummarySchema>;
+
 /** 预览成功时的待确认摘要；`confirmationId` 是提交时的幂等标识。 */
 const eligiblePreviewSchema = z.object({
   ...exchangePreviewBase,
   outcome: z.literal('eligible'),
   confirmationId: z.string(),
   expiresAt: z.number().int(),
-  summary: z.object({
-    orderId: z.string(),
-    productName: z.string(),
-    reason: exchangeReasonSchema,
-    reasonLabel: z.string(),
-    shipping: z.object({
-      borneBy: z.enum(['merchant', 'customer']),
-      note: z.string()
-    }),
-    sources: z.array(faqSourceSchema)
-  })
+  summary: exchangeSummarySchema
 });
 
 const ineligiblePreviewSchema = z.object({

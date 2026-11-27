@@ -70,6 +70,26 @@ const MIGRATIONS: readonly Migration[] = [
         created_at INTEGER NOT NULL
       ) STRICT;
     `
+  },
+  {
+    version: 3,
+    sql: `
+      -- 对话内换货按访客保存当前步骤；订单被清理时同步删除进度。
+      -- 每位访客同时只有一段办理，主键即 visitor_id。
+      CREATE TABLE exchange_flows (
+        visitor_id TEXT PRIMARY KEY,
+        order_id TEXT NOT NULL REFERENCES demo_orders(order_id) ON DELETE CASCADE,
+        step TEXT NOT NULL CHECK (step IN ('reason', 'declaration', 'confirmation')),
+        reason TEXT CHECK (reason IN ('quality', 'other')),
+        item_intact INTEGER NOT NULL DEFAULT 0 CHECK (item_intact IN (0, 1)),
+        accessories_complete INTEGER NOT NULL DEFAULT 0 CHECK (accessories_complete IN (0, 1)),
+        original_packaging INTEGER NOT NULL DEFAULT 0 CHECK (original_packaging IN (0, 1)),
+        gift_complete INTEGER NOT NULL DEFAULT 0 CHECK (gift_complete IN (0, 1)),
+        confirmation_id TEXT,
+        expires_at INTEGER,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+    `
   }
 ];
 

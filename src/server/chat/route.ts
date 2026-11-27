@@ -10,6 +10,7 @@ import { hashSessionToken } from '../demo-session/token.js';
 import { DEMO_SESSION_COOKIE, readCookie } from '../http/cookies.js';
 import type { RateLimiter } from '../http/rate-limit.js';
 import { isTrustedSameOrigin } from '../http/same-origin.js';
+import { handleExchangeFlow } from '../exchange/flow.js';
 import { handleOrderQuestion } from '../orders/query.js';
 import { ChatUpstreamError, answerChatQuestion } from './answer-question.js';
 
@@ -54,6 +55,16 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatRouteDeps): vo
     const token = readCookie(request.headers.cookie, DEMO_SESSION_COOKIE);
     const tokenHash = token ? hashSessionToken(token) : undefined;
     const currentTime = now();
+
+    // 换货办理先于查单分发：办理期间的补问需要与查单互斥，且全程不进入模型。
+    const exchangeResult = handleExchangeFlow(parsed.data.question, {
+      repository: deps.repository,
+      tokenHash,
+      now: currentTime
+    });
+    if (exchangeResult) {
+      return exchangeResult;
+    }
 
     // 查单先于 FAQ 和模型分发；命中后不再发起任何外部生成请求。
     const orderResult = handleOrderQuestion(parsed.data.question, {

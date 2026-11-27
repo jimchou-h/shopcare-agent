@@ -5,37 +5,46 @@ import {
   type ChatResponse
 } from '../../shared/chat';
 
-type ChatState =
-  | { kind: 'idle' }
-  | { kind: 'invalid' }
-  | { kind: 'pending' }
-  | { kind: 'result'; question: string; response: ChatResponse }
-  | { kind: 'failed'; question: string; message: string };
+/** 会话区按消息顺序展示；失败消息保留原问题，便于只重试这一轮。 */
+export type ChatMessage =
+  | { id: number; role: 'user'; text: string }
+  | { id: number; role: 'assistant'; question: string; response: ChatResponse }
+  | { id: number; role: 'failure'; question: string; message: string };
+
+export type ChatStatus = 'idle' | 'invalid' | 'pending';
 
 const DEFAULT_FAILURE_MESSAGE = '问答服务暂时不可用，请稍后重试。';
 
 /** 只携带服务端应用文案，避免把网络异常等技术细节直接展示给顾客。 */
 class ChatRequestError extends Error {}
 
-/** 提交、编辑草稿和重试是独立操作，结果始终与实际提交的问题对应。 */
+/** 提交、编辑草稿、发送快捷回复和重试是独立操作，结果始终与实际提交的问题对应。 */
 export function useChat() {
   const [draft, setDraft] = useState('');
-  const [state, setState] = useState<ChatState>({ kind: 'idle' });
+  const [status, setStatus] = useState<ChatStatus>('idle');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const activeRequest = useRef<AbortController | null>(null);
+  const nextId = useRef(0);
 
   useEffect(() => () => activeRequest.current?.abort(), []);
 
-  async function ask(question: string) {
+  async function ask(question: string, options: { appendUser: boolean }) {
     const submittedQuestion = question.trim();
     if (!submittedQuestion) {
-      setState({ kind: 'invalid' });
+      setStatus('invalid');
       return;
     }
 
     activeRequest.current?.abort();
     const controller = new AbortController();
     activeRequest.current = controller;
-    setState({ kind: 'pending' });
+
+    if (options.appendUser) {
+      nextId.current += 1;
+      const id = nextId.current;
+      setMessages((current) => [...current, { id, role: 'user', text: submittedQuestion }]);
+    }
+    setStatus('pending');
 
     try {
       const response = await fetch('/api/chat', {
@@ -58,17 +67,30 @@ export function useChat() {
       }
 
       const parsed = chatResponseSchema.parse(await response.json());
-      // 即使旧请求忽略了中止信号，也不能覆盖后一次提交的结果。
+      // 即使旧请求忽略了中止信号，也不能追加到后一次提交之后。
       if (!controller.signal.aborted) {
-        setState({ kind: 'result', question: submittedQuestion, response: parsed });
+        nextId.current += 1;
+        const id = nextId.current;
+        setMessages((current) => [
+          ...current,
+          { id, role: 'assistant', question: submittedQuestion, response: parsed }
+        ]);
+        setStatus('idle');
       }
     } catch (error) {
       if (!controller.signal.aborted) {
-        setState({
-          kind: 'failed',
-          question: submittedQuestion,
-          message: error instanceof ChatRequestError ? error.message : DEFAULT_FAILURE_MESSAGE
-        });
+        nextId.current += 1;
+        const id = nextId.current;
+        setMessages((current) => [
+          ...current,
+          {
+            id,
+            role: 'failure',
+            question: submittedQuestion,
+            message: error instanceof ChatRequestError ? error.message : DEFAULT_FAILURE_MESSAGE
+          }
+        ]);
+        setStatus('idle');
       }
     } finally {
       if (activeRequest.current === controller) {
@@ -80,14 +102,26 @@ export function useChat() {
   return {
     draft,
     setDraft,
-    state,
+    status,
+    messages,
     submit() {
-      void ask(draft);
+      void ask(draft, { appendUser: true });
+    },
+    /** 快捷选项直接作为下一轮问题提交，不覆盖输入框中的草稿。 */
+    send(question: string) {
+      void ask(question, { appendUser: true });
     },
     retry() {
-      if (state.kind === 'failed') {
-        void ask(state.question);
+      const failure = [...messages]
+        .reverse()
+        .find((message): message is Extract<ChatMessage, { role: 'failure' }> =>
+          message.role === 'failure'
+        );
+      if (!failure) {
+        return;
       }
+      setMessages((current) => current.filter((message) => message.id !== failure.id));
+      void ask(failure.question, { appendUser: false });
     }
   };
 }

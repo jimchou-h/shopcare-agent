@@ -333,13 +333,19 @@ describe('POST /api/chat 在对话内办理换货', () => {
     });
   });
 
-  it('否定表述的商品申报不会被当作满足条件', async () => {
+  it.each([
+    '配件不齐全',
+    '商品不完好',
+    '包装不完整',
+    '配件没到齐',
+    '原包装已拆封'
+  ])('否定申报「%s」不会被当作满足条件', async (answer) => {
     await withHarness(async (harness) => {
       const { cookie, orderId } = await harness.claim();
       await harness.ask('我想换货', { cookie });
       await harness.ask('质量问题', { cookie });
 
-      const response = await harness.ask('配件不齐全', { cookie });
+      const response = await harness.ask(answer, { cookie });
       expect(response.json()).toMatchObject({
         status: 'exchange_flow',
         outcome: 'ineligible',
@@ -353,14 +359,38 @@ describe('POST /api/chat 在对话内办理换货', () => {
     });
   });
 
-  it('询问如何取消换货不会结束办理', async () => {
+  it.each(['没问题，都齐全', '商品完好，配件齐全', '未拆封，都齐全'])(
+    '肯定申报「%s」仍可生成摘要',
+    async (answer) => {
+      await withHarness(async (harness) => {
+        const { cookie, orderId } = await harness.claim();
+        await harness.ask('我想换货', { cookie });
+        await harness.ask('质量问题', { cookie });
+
+        const summary = await harness.ask(answer, { cookie });
+        expect(summary.json()).toMatchObject({
+          status: 'exchange_flow',
+          outcome: 'summary',
+          summary: { orderId, reason: 'quality' }
+        });
+      });
+    }
+  );
+
+  it.each([
+    '如何取消换货？',
+    '怎么取消换货',
+    '怎样取消换货',
+    '取消换货的方法',
+    '取消换货可以吗'
+  ])('询问「%s」不会结束办理', async (question) => {
     await withHarness(async (harness) => {
       const { cookie, orderId } = await harness.claim();
       await harness.ask('我想换货', { cookie });
       await harness.ask('质量问题', { cookie });
 
-      const question = await harness.ask('如何取消换货？', { cookie });
-      expect(question.json()).not.toMatchObject({ outcome: 'cancelled' });
+      const response = await harness.ask(question, { cookie });
+      expect(response.json()).not.toMatchObject({ outcome: 'cancelled' });
       expect(harness.readAll<{ step: string; reason: string }>(
         'SELECT step, reason FROM exchange_flows'
       )).toEqual([{ step: 'declaration', reason: 'quality' }]);

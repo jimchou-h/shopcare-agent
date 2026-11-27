@@ -38,16 +38,19 @@ const INELIGIBLE_MESSAGES: Record<ExchangeIneligibleReason, string> = {
 
 type Intent = 'start' | 'resume' | 'cancel' | 'confirm' | null;
 
-/** 疑问句优先按政策问答处理，避免把「换货期限是多久？」当成办理指令。 */
-function isQuestionShaped(question: string): boolean {
-  return question.includes('？') || question.includes('?');
+/** 疑问说法优先按政策问答处理，包括省略问号的口语提问。 */
+const QUESTION_PATTERN =
+  /怎么|如何|怎样|咋|为什么|为何|是否|能否|可否|能不能|可不可以|可以.*吗|吗\s*$|呢\s*$|多久|多少|几天|方法|办法|步骤|流程|什么(时候|意思|区别|政策|条件|规定|情况)/;
+
+function isQuestionLike(question: string): boolean {
+  return question.includes('？') || question.includes('?') || QUESTION_PATTERN.test(question);
 }
 
 function detectIntent(question: string): Intent {
   const text = question.trim();
 
-  // 疑问句是政策咨询，不能当作办理、恢复或取消指令。
-  if (isQuestionShaped(text)) {
+  // 疑问说法是政策咨询，不能当作办理、恢复或取消指令。
+  if (isQuestionLike(text)) {
     return null;
   }
 
@@ -78,13 +81,27 @@ function parseReason(question: string): ExchangeReason | null {
 }
 
 /**
+ * 「否定坏情况」的肯定说法，例如「没问题」「没有破损」「未拆封」。
+ *
+ * 先剔除这些片段，再检查剩余文本里的否定词，避免把「完好」等正向词
+ * 或「没问题」等常见肯定答复误判。
+ */
+const AFFIRMED_ABSENCE =
+  /没问题|没(有)?(破损|损坏|缺少|缺失|少|坏)|无(损|破损|损坏|问题|缺失|刮痕|划痕)|未(拆封|拆|使用|开封)|不(缺少|缺|少)/g;
+const AFFIRMED_ABSENCE_TEST =
+  /没问题|没(有)?(破损|损坏|缺少|缺失|少|坏)|无(损|破损|损坏|问题|缺失|刮痕|划痕)|未(拆封|拆|使用|开封)|不(缺少|缺|少)/;
+const NEGATIVE_DECLARATION = /不|没|未|无|缺|少|拆|破损|损坏|丢失|坏|影响二次销售/;
+const POSITIVE_DECLARATION = /完好|齐全|完整|都齐|符合|满足|是的|确认|可以|正常/;
+
+/**
  * 对话只做一轮商品申报：全部齐全视为满足条件，出现缺件或拆封按不满足处理。
  *
  * 演示无法核实实物，申报只用于确定后续资格判断与政策出处。
  */
 function parseDeclaration(question: string): ExchangeDeclaration | null {
-  // 否定表述优先，避免「配件不齐全」被正向的「齐全」误判为满足条件。
-  if (/缺|少|拆|破损|丢失|不全|不齐|未齐|没齐|不完整|影响二次销售|没有/.test(question)) {
+  // 否定修饰优先：「商品不完好」「配件不齐全」不能被正向词「完好/齐全」误判。
+  const remaining = question.replace(AFFIRMED_ABSENCE, '');
+  if (NEGATIVE_DECLARATION.test(remaining)) {
     return {
       itemIntact: false,
       accessoriesComplete: false,
@@ -92,7 +109,7 @@ function parseDeclaration(question: string): ExchangeDeclaration | null {
       giftComplete: false
     };
   }
-  if (/完好|齐全|没问题|符合|满足|都齐|是的|确认|可以/.test(question)) {
+  if (POSITIVE_DECLARATION.test(remaining) || AFFIRMED_ABSENCE_TEST.test(question)) {
     return {
       itemIntact: true,
       accessoriesComplete: true,
@@ -299,7 +316,7 @@ export function handleExchangeFlow(
   }
 
   // 带单号的查单和政策提问交给后续路径，当前步骤与已收集信息保持不变。
-  if (containsOrderToken(question) || isQuestionShaped(question)) {
+  if (containsOrderToken(question) || isQuestionLike(question)) {
     return null;
   }
 

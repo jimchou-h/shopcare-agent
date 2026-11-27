@@ -371,7 +371,10 @@ describe('POST /api/chat 在对话内办理换货', () => {
     '齐全，只是说明书少了',
     '齐全，配件缺失',
     '齐全，已拆封',
-    '齐全，包装破损'
+    '齐全，包装破损',
+    '齐全 不齐全',
+    '不是齐全',
+    '齐全，随便吧'
   ])('自由文本「%s」无法判断时继续询问选择', async (answer) => {
     await withHarness(async (harness) => {
       const { cookie, orderId } = await harness.claim();
@@ -490,8 +493,21 @@ describe('POST /api/chat 在对话内办理换货', () => {
     });
   });
 
-  it.each(['齐全', '完整', '齐全！', '齐全！确定', '好的，齐全', '嗯，完整'])(
-    '明确选择「%s」可生成摘要',
+  it.each([
+    '齐全',
+    '完整',
+    '齐全！',
+    '齐全！确定',
+    '好的，齐全',
+    '嗯，完整',
+    '齐全 齐全',
+    '齐全 完整',
+    '是齐全',
+    '对齐全',
+    '齐全，谢谢',
+    '好的，齐全，麻烦了',
+    '是完整，多谢'
+  ])('明确选择「%s」可生成摘要',
     async (answer) => {
     await withHarness(async (harness) => {
       const { cookie, orderId } = await harness.claim();

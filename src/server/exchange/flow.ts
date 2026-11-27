@@ -105,6 +105,20 @@ const POLICY_TOPIC =
 
 /** 可以与选项分处不同标点段的明确确认词。 */
 const CONFIRMATION_SEGMENTS = new Set(['好的', '好吧', '嗯', '确定', '确认', '是', '对', '行', '可以', '好']);
+/** 固定的礼貌结束语，只忽略这些白名单词，不忽略任意未知文本。 */
+const POLITE_SEGMENTS = new Set(['谢谢', '多谢', '麻烦了', '辛苦了']);
+/** 单个分段允许剥离一次前置确认词，例如「是齐全」「对齐全」。 */
+const CONFIRMATION_PREFIX = /^(好的|好吧|嗯|确定|确认|是|对|行|可以|好)/;
+
+function matchOption(segment: string): boolean | undefined {
+  const direct = DECLARATION_ANSWERS.get(segment);
+  if (direct !== undefined) {
+    return direct;
+  }
+  // 只剥离一次；「不是齐全」「不齐全」不以确认词开头，不会被剥成相反选项。
+  const stripped = segment.replace(CONFIRMATION_PREFIX, '');
+  return stripped === segment ? undefined : DECLARATION_ANSWERS.get(stripped);
+}
 
 function parseDeclaration(question: string): ExchangeDeclaration | null {
   // 问号表示疑问，保留下来交给二选一提示，而不是当作已选择。
@@ -112,20 +126,19 @@ function parseDeclaration(question: string): ExchangeDeclaration | null {
     return null;
   }
 
-  // 整句只允许「确认词段 + 唯一一个明确选项段」；任何无法识别的分段都不静默忽略。
+  // 只允许确认词 / 礼貌结束语 / 明确选项；其它无法识别的分段一律回到选择提示。
   const segments = question.split(/[\s，。、,!！：:；;]+/).filter(Boolean);
   let answer: boolean | undefined;
-  let optionCount = 0;
   for (const segment of segments) {
-    if (CONFIRMATION_SEGMENTS.has(segment)) {
+    if (CONFIRMATION_SEGMENTS.has(segment) || POLITE_SEGMENTS.has(segment)) {
       continue;
     }
-    const value = DECLARATION_ANSWERS.get(segment);
+    const value = matchOption(segment);
     if (value === undefined) {
       return null;
     }
-    optionCount += 1;
-    if (optionCount > 1) {
+    // 允许多个相同含义的选项（齐全 齐全 / 齐全 完整），但拒绝冲突（齐全 不齐全）。
+    if (answer !== undefined && answer !== value) {
       return null;
     }
     answer = value;

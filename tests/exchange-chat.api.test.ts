@@ -397,8 +397,8 @@ describe('POST /api/chat 在对话内办理换货', () => {
     });
   });
 
-  it.each(['齐全吗', '完整吗', '是否齐全', '不齐全吗', '是不是齐全'])(
-    '申报步骤询问「%s」回到二选一提示',
+  it.each(['齐全？', '完整？', '这个算齐全吗', '齐全了吗', '是否齐全', '不齐全吗', '齐全呢'])(
+    '申报步骤的疑问变体「%s」默认回到二选一提示',
     async (question) => {
       await withHarness(async (harness) => {
         const { cookie, orderId } = await harness.claim();
@@ -430,6 +430,34 @@ describe('POST /api/chat 在对话内办理换货', () => {
       });
     }
   );
+
+  it.each([
+    '换货期限是多久？',
+    '运费谁承担？',
+    '几天内可以申请？',
+    '什么时候截止？',
+    '换货政策是什么？'
+  ])('申报步骤询问政策「%s」仍转给 FAQ', async (question) => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      await harness.ask('我想换货', { cookie });
+      await harness.ask('质量问题', { cookie });
+
+      const response = await harness.ask(question, { cookie });
+      expect(['answered', 'insufficient_evidence']).toContain(response.json().status);
+      expect(harness.readAll<{ step: string; reason: string }>(
+        'SELECT step, reason FROM exchange_flows'
+      )).toEqual([{ step: 'declaration', reason: 'quality' }]);
+      expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
+
+      // FAQ 回答后仍可继续选择商品现状。
+      const summary = await harness.ask('齐全', { cookie });
+      expect(summary.json()).toMatchObject({
+        outcome: 'summary',
+        summary: { orderId, reason: 'quality' }
+      });
+    });
+  });
 
   it.each(['齐全', '完整'])('明确选择「%s」可生成摘要', async (answer) => {
     await withHarness(async (harness) => {

@@ -94,17 +94,18 @@ const DECLARATION_ANSWERS = new Map<string, boolean>([
   ['缺件', false]
 ]);
 
-/** 选项的疑问形式，例如「齐全吗」「是否齐全」「不齐全吗」，只用于重新提示选择。 */
-const DECLARATION_QUESTION =
-  /^(?:(?:是否|是不是)(?:齐全|完整|不齐全|不完整|缺件)|(?:齐全|完整|不齐全|不完整|缺件)(?:吗|呢))$/;
-
-function isDeclarationQuestion(question: string): boolean {
-  return DECLARATION_QUESTION.test(question.replace(/[\s，。！？、,.!?]/g, ''));
-}
+/**
+ * 申报步骤里只有明确询问政策主题的内容才转给 FAQ。
+ *
+ * 其余内容（包括「齐全？」「这个算齐全吗」「齐全了吗」等疑问变体）默认继续
+ * 展示二选一，避免用逐句枚举猜测顾客是不是在问政策。
+ */
+const POLICY_TOPIC =
+  /期限|运费|几天|多少天|多久|什么时候|何时|政策|规则|规定|条件|要求|流程|步骤|取消/;
 
 function parseDeclaration(question: string): ExchangeDeclaration | null {
-  // 去除空白和标点，只接受明确的选项值，避免关键词猜测商品是否齐全。
-  const answer = DECLARATION_ANSWERS.get(question.replace(/[\s，。！？、,.!?]/g, ''));
+  // 去除空白和句读，但保留问号：带问号的「齐全？」应回到选择提示而不是直接推进。
+  const answer = DECLARATION_ANSWERS.get(question.replace(/[\s，。、,!]/g, ''));
   if (answer === undefined) {
     return null;
   }
@@ -326,13 +327,8 @@ export function handleExchangeFlow(
     return notice(EXCHANGE_FLOW_MESSAGES.orderQueryConflict);
   }
 
-  // 申报步骤优先识别选项的疑问形式，回到二选一，而不是被当作政策问答。
-  if (flow.step === 'declaration' && flow.reason && isDeclarationQuestion(question)) {
-    return declarationUnknownStep(flow.orderId, flow.reason);
-  }
-
-  // 带单号的查单和政策提问交给后续路径，当前步骤与已收集信息保持不变。
-  if (containsOrderToken(question) || isQuestionLike(question)) {
+  // 带单号的查单交给后续路径；申报步骤默认继续补问，只有明确政策主题才转给 FAQ。
+  if (containsOrderToken(question) || POLICY_TOPIC.test(question)) {
     return null;
   }
 

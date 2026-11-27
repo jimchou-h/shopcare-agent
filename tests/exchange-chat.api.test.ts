@@ -333,7 +333,7 @@ describe('POST /api/chat 在对话内办理换货', () => {
     });
   });
 
-  it.each(['不齐全', '不完整', '缺件'])(
+  it.each(['不齐全', '不完整', '缺件', '确定：不齐全', '对，不完整'])(
     '明确选择「%s」按商品条件不满足处理',
     async (answer) => {
       await withHarness(async (harness) => {
@@ -397,7 +397,7 @@ describe('POST /api/chat 在对话内办理换货', () => {
     });
   });
 
-  it.each(['齐全？', '完整？', '这个算齐全吗', '齐全了吗', '是否齐全', '不齐全吗', '齐全呢'])(
+  it.each(['齐全？', '完整？', '这个算齐全吗', '齐全了吗', '是否齐全', '不齐全吗', '齐全呢', '好的，齐全？'])(
     '申报步骤的疑问变体「%s」默认回到二选一提示',
     async (question) => {
       await withHarness(async (harness) => {
@@ -459,7 +459,9 @@ describe('POST /api/chat 在对话内办理换货', () => {
     });
   });
 
-  it.each(['齐全', '完整'])('明确选择「%s」可生成摘要', async (answer) => {
+  it.each(['齐全', '完整', '齐全！', '齐全！确定', '好的，齐全', '嗯，完整'])(
+    '明确选择「%s」可生成摘要',
+    async (answer) => {
     await withHarness(async (harness) => {
       const { cookie, orderId } = await harness.claim();
       await harness.ask('我想换货', { cookie });

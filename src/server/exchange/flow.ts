@@ -103,9 +103,22 @@ const DECLARATION_ANSWERS = new Map<string, boolean>([
 const POLICY_TOPIC =
   /期限|运费|几天|多少天|多久|什么时候|何时|政策|规则|规定|条件|要求|流程|步骤|取消/;
 
+/**
+ * 归一化申报回答：保留问号（疑问不当作选择），去掉其它标点和常见确认前后缀。
+ *
+ * 例如「齐全！」「齐全！确定」「好的，齐全」都归一到「齐全」；
+ * 「齐全？」保持问号，继续回到二选一提示。
+ */
+function normalizeDeclarationAnswer(question: string): string {
+  return question
+    .replace(/[\s，。、,!！：:；;]/g, '')
+    .replace(/^(好的|好吧|嗯|确定|确认|是|对|行|可以|好)/, '')
+    .replace(/(好的|确定|确认|是|对|行|可以)$/, '');
+}
+
 function parseDeclaration(question: string): ExchangeDeclaration | null {
-  // 去除空白和句读，但保留问号：带问号的「齐全？」应回到选择提示而不是直接推进。
-  const answer = DECLARATION_ANSWERS.get(question.replace(/[\s，。、,!]/g, ''));
+  // 只接受明确的选项值；保留问号，避免把「齐全？」当成已选择。
+  const answer = DECLARATION_ANSWERS.get(normalizeDeclarationAnswer(question));
   if (answer === undefined) {
     return null;
   }

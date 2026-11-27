@@ -367,7 +367,11 @@ describe('POST /api/chat 在对话内办理换货', () => {
     '有缺失',
     '都完整',
     '不，齐全',
-    '不是，完整'
+    '不是，完整',
+    '齐全，只是说明书少了',
+    '齐全，配件缺失',
+    '齐全，已拆封',
+    '齐全，包装破损'
   ])('自由文本「%s」无法判断时继续询问选择', async (answer) => {
     await withHarness(async (harness) => {
       const { cookie, orderId } = await harness.claim();

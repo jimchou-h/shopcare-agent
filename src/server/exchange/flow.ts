@@ -105,7 +105,6 @@ const POLICY_TOPIC =
 
 /** 可以与选项分处不同标点段的明确确认词。 */
 const CONFIRMATION_SEGMENTS = new Set(['好的', '好吧', '嗯', '确定', '确认', '是', '对', '行', '可以', '好']);
-const NEGATION_SEGMENT = /不|没|未|无|否/;
 
 function parseDeclaration(question: string): ExchangeDeclaration | null {
   // 问号表示疑问，保留下来交给二选一提示，而不是当作已选择。
@@ -113,23 +112,20 @@ function parseDeclaration(question: string): ExchangeDeclaration | null {
     return null;
   }
 
-  // 先按标点切分：「不，齐全」不能被拼成相反的「不齐全」。
+  // 整句只允许「确认词段 + 唯一一个明确选项段」；任何无法识别的分段都不静默忽略。
   const segments = question.split(/[\s，。、,!！：:；;]+/).filter(Boolean);
   let answer: boolean | undefined;
+  let optionCount = 0;
   for (const segment of segments) {
     if (CONFIRMATION_SEGMENTS.has(segment)) {
       continue;
     }
     const value = DECLARATION_ANSWERS.get(segment);
     if (value === undefined) {
-      // 否定词单独成段时含义不明，交给二选一提示澄清。
-      if (NEGATION_SEGMENT.test(segment)) {
-        return null;
-      }
-      continue;
+      return null;
     }
-    // 同时出现互相矛盾的选项时不做猜测。
-    if (answer !== undefined && answer !== value) {
+    optionCount += 1;
+    if (optionCount > 1) {
       return null;
     }
     answer = value;

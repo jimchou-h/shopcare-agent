@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/web/App';
@@ -113,5 +113,37 @@ describe('聊天式页面布局', () => {
     expect(within(composer).getByRole('button', { name: '换货期限是多久？' })).toHaveClass(
       'ant-btn'
     );
+  });
+
+  it('发送请求期间按钮具有可访问的禁用语义', async () => {
+    let resolveChat: (value: unknown) => void = () => undefined;
+    const pendingChat = new Promise((resolve) => {
+      resolveChat = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === '/api/demo/session') {
+          return { ok: true, json: async () => claimed };
+        }
+        return pendingChat;
+      })
+    );
+
+    render(<App />);
+    const user = userEvent.setup();
+    const input = screen.getByLabelText('你的问题');
+    await user.type(input, '换货期限是多久？');
+
+    const submit = screen.getByRole('button', { name: '查询' });
+    await user.click(submit);
+
+    // 请求未完成时按钮必须带原生 disabled，键盘和读屏都能识别为不可操作。
+    expect(submit).toBeDisabled();
+    expect(submit).toHaveAttribute('disabled');
+
+    resolveChat({ ok: true, json: async () => answered('请求完成。') });
+    expect(await screen.findByText('请求完成。')).toBeInTheDocument();
+    await waitFor(() => expect(submit).toBeEnabled());
   });
 });

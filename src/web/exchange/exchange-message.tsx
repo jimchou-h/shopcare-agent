@@ -177,6 +177,7 @@ export function ExchangeSummaryCard({
         type="primary"
         block
         loading={state.kind === 'pending'}
+        disabled={state.kind === 'pending'}
         onClick={() => void requestConfirm()}
         style={{ marginTop: 12 }}
       >

@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { removeTempDir } from './support/temp';
 import { describe, expect, it } from 'vitest';
 import { buildApp } from '../src/server/app';
 import { DEFAULT_SESSION_TTL_MS } from '../src/server/demo-session/repository';
@@ -23,7 +24,7 @@ function createTempDatabase(): TempDatabase {
     directory,
     databasePath: join(directory, 'shopcare.sqlite'),
     cleanup() {
-      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      removeTempDir(directory);
     }
   };
 }

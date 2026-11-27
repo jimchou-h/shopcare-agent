@@ -421,7 +421,12 @@ export function App() {
                   status={status === 'invalid' ? 'error' : undefined}
                   aria-describedby={status === 'invalid' ? 'question-error' : undefined}
                 />
-                <Button type="primary" htmlType="submit" loading={status === 'pending'}>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  loading={status === 'pending'}
+                  disabled={status === 'pending'}
+                >
                   查询
                 </Button>
               </Flex>

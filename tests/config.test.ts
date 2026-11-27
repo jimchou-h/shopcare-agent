@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { removeTempDir } from './support/temp';
 import { describe, expect, it } from 'vitest';
 import { ConfigError, loadConfig, loadLocalEnv } from '../src/server/config';
 
@@ -82,7 +83,7 @@ describe('loadLocalEnv', () => {
           process.env[key] = value;
         }
       }
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      removeTempDir(dir);
     }
   });
 });

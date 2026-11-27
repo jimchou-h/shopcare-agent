@@ -231,4 +231,52 @@ describe('顾客在对话里办理换货', () => {
     expect(await screen.findByTestId('exchange-summary')).toBeInTheDocument();
     expect(screen.getByTestId('exchange-reason-label')).toHaveTextContent('质量问题');
   });
+
+  it('确认提交期间按钮具有可访问的禁用语义', async () => {
+    let resolveConfirm: (value: unknown) => void = () => undefined;
+    const pendingConfirm = new Promise((resolve) => {
+      resolveConfirm = resolve;
+    });
+    const queue = [reasonStep, declarationStep, summaryResponse];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === '/api/demo/session') {
+          return jsonResponse(claimed);
+        }
+        if (url === '/api/chat') {
+          return jsonResponse(queue.shift());
+        }
+        if (url === '/api/exchange/confirm') {
+          return pendingConfirm;
+        }
+        throw new Error(`未预期的请求：${url}`);
+      })
+    );
+
+    render(<App />);
+    const user = userEvent.setup();
+    const input = screen.getByLabelText('你的问题');
+
+    await user.type(input, '我想换货');
+    await user.click(screen.getByRole('button', { name: '查询' }));
+    await screen.findByRole('button', { name: '质量问题' });
+    await user.click(screen.getByRole('button', { name: '质量问题' }));
+    await screen.findByRole('button', { name: '都齐全' });
+    await user.click(screen.getByRole('button', { name: '都齐全' }));
+    await screen.findByTestId('exchange-summary');
+
+    const confirm = screen.getByRole('button', { name: '确认提交' });
+    await user.click(confirm);
+
+    // 确认请求未完成时按钮必须带原生 disabled，避免重复提交。
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute('disabled');
+
+    resolveConfirm(jsonResponse(submittedResponse));
+    expect(await screen.findByTestId('exchange-receipt')).toHaveTextContent('已提交');
+    expect(screen.getByTestId('exchange-application-id')).toHaveTextContent(
+      'EX-AB12CD34EF56'
+    );
+  });
 });

@@ -1,8 +1,9 @@
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { removeTempDir } from './support/temp';
 import { describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/server/app';
 import type { ServerConfig } from '../src/server/config';
@@ -128,8 +129,7 @@ async function withHarness(
     await run(buildHarness(app, databasePath));
   } finally {
     await app.close();
-    // Windows 上 SQLite 句柄释放可能滞后，重试删除避免偶发 EPERM。
-    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    removeTempDir(directory);
   }
 }
 

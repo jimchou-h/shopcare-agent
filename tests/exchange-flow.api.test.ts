@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { removeTempDir } from './support/temp';
 import { describe, expect, it } from 'vitest';
 import { buildApp } from '../src/server/app';
 import type { DemoSessionResponse } from '../src/shared/orders';
@@ -107,7 +108,50 @@ describe('对话内换货进度持久化', () => {
         await rebuilt.close();
       }
     } finally {
-      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      removeTempDir(directory);
+    }
+  });
+
+  it('刷新后在同一会话继续发送消息即可恢复办理', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'shopcare-flow-refresh-'));
+    const databasePath = join(directory, 'shopcare.sqlite');
+
+    try {
+      const first = buildApp({ config: { chatMode: 'preset', databasePath }, now: () => NOW });
+      let cookie = '';
+      let orderId = '';
+      try {
+        const claimed = await claim(first);
+        cookie = claimed.cookie;
+        orderId = claimed.orderId;
+        await startAndChooseReason(first, cookie);
+      } finally {
+        await first.close();
+      }
+
+      // 模拟刷新：同一会话进入新的页面/服务实例，直接继续发消息而不是先恢复步骤。
+      const refreshed = buildApp({
+        config: { chatMode: 'preset', databasePath },
+        now: () => NOW
+      });
+      try {
+        const faq = await ask(refreshed, '换货期限是多久？', cookie);
+        expect(faq.json()).toMatchObject({
+          status: 'answered',
+          source: { id: 'faq-exchange-window' }
+        });
+
+        const summary = await ask(refreshed, '都齐全', cookie);
+        expect(summary.json()).toMatchObject({
+          status: 'exchange_flow',
+          outcome: 'summary',
+          summary: { orderId, reason: 'quality', reasonLabel: '质量问题' }
+        });
+      } finally {
+        await refreshed.close();
+      }
+    } finally {
+      removeTempDir(directory);
     }
   });
 
@@ -165,7 +209,7 @@ describe('对话内换货进度持久化', () => {
         await app.close();
       }
     } finally {
-      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      removeTempDir(directory);
     }
   });
 
@@ -186,7 +230,7 @@ describe('对话内换货进度持久化', () => {
         await app.close();
       }
     } finally {
-      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      removeTempDir(directory);
     }
   });
 });

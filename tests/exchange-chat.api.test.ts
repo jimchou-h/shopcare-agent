@@ -362,7 +362,10 @@ describe('POST /api/chat 在对话内办理换货', () => {
     '包装不完整',
     '配件没到齐',
     '原包装已拆封',
-    '看起来没问题吧'
+    '看起来没问题吧',
+    '都齐全',
+    '有缺失',
+    '都完整'
   ])('自由文本「%s」无法判断时继续询问选择', async (answer) => {
     await withHarness(async (harness) => {
       const { cookie, orderId } = await harness.claim();
@@ -393,6 +396,40 @@ describe('POST /api/chat 在对话内办理换货', () => {
       expect(harness.readAll('SELECT * FROM exchange_applications')).toEqual([]);
     });
   });
+
+  it.each(['齐全吗', '完整吗', '是否齐全', '不齐全吗', '是不是齐全'])(
+    '申报步骤询问「%s」回到二选一提示',
+    async (question) => {
+      await withHarness(async (harness) => {
+        const { cookie, orderId } = await harness.claim();
+        await harness.ask('我想换货', { cookie });
+        await harness.ask('质量问题', { cookie });
+
+        const response = await harness.ask(question, { cookie });
+        expect(response.json()).toMatchObject({
+          status: 'exchange_flow',
+          outcome: 'step',
+          step: 'declaration',
+          orderId,
+          reason: 'quality',
+          message: '无法判断商品现状，请选择「齐全」或「不齐全」。',
+          options: ['齐全', '不齐全']
+        });
+        expect(response.json()).not.toHaveProperty('confirmationId');
+        expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
+        expect(harness.readAll<{ step: string; reason: string }>(
+          'SELECT step, reason FROM exchange_flows'
+        )).toEqual([{ step: 'declaration', reason: 'quality' }]);
+
+        // 重新提示后仍可选择，说明没有把疑问当成政策问答或取消办理。
+        const summary = await harness.ask('齐全', { cookie });
+        expect(summary.json()).toMatchObject({
+          outcome: 'summary',
+          summary: { orderId, reason: 'quality' }
+        });
+      });
+    }
+  );
 
   it.each(['齐全', '完整'])('明确选择「%s」可生成摘要', async (answer) => {
     await withHarness(async (harness) => {

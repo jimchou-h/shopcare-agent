@@ -83,19 +83,24 @@ function parseReason(question: string): ExchangeReason | null {
 /**
  * 商品状态是明确的二选一，不从不完整描述里推断「是否齐全」。
  *
- * 保留少量等价选项（完整 / 有缺失）兼容顾客直接输入，以及部署前已存在的
- * 办理提示；其余自由文本一律返回 null，由页面继续询问选择。
+ * 只接受「齐全 / 不齐全」及「完整 / 不完整 / 缺件」这些明确值；
+ * 其余自由文本返回 null，由页面继续询问选择。
  */
 const DECLARATION_ANSWERS = new Map<string, boolean>([
   ['齐全', true],
-  ['都齐全', true],
   ['完整', true],
-  ['都完整', true],
   ['不齐全', false],
-  ['有缺失', false],
-  ['缺件', false],
-  ['不完整', false]
+  ['不完整', false],
+  ['缺件', false]
 ]);
+
+/** 选项的疑问形式，例如「齐全吗」「是否齐全」「不齐全吗」，只用于重新提示选择。 */
+const DECLARATION_QUESTION =
+  /^(?:(?:是否|是不是)(?:齐全|完整|不齐全|不完整|缺件)|(?:齐全|完整|不齐全|不完整|缺件)(?:吗|呢))$/;
+
+function isDeclarationQuestion(question: string): boolean {
+  return DECLARATION_QUESTION.test(question.replace(/[\s，。！？、,.!?]/g, ''));
+}
 
 function parseDeclaration(question: string): ExchangeDeclaration | null {
   // 去除空白和标点，只接受明确的选项值，避免关键词猜测商品是否齐全。
@@ -130,6 +135,21 @@ function declarationStep(orderId: string, reason: ExchangeReason): ExchangeFlowR
     orderId,
     reason,
     message: `已记录换货原因：${exchangeReasonLabel(reason)}。${EXCHANGE_FLOW_MESSAGES.declarationStep}`,
+    options: DECLARATION_OPTIONS
+  };
+}
+
+function declarationUnknownStep(
+  orderId: string,
+  reason: ExchangeReason
+): ExchangeFlowResponse {
+  return {
+    status: 'exchange_flow',
+    outcome: 'step',
+    step: 'declaration',
+    orderId,
+    reason,
+    message: EXCHANGE_FLOW_MESSAGES.declarationUnknown,
     options: DECLARATION_OPTIONS
   };
 }
@@ -306,6 +326,11 @@ export function handleExchangeFlow(
     return notice(EXCHANGE_FLOW_MESSAGES.orderQueryConflict);
   }
 
+  // 申报步骤优先识别选项的疑问形式，回到二选一，而不是被当作政策问答。
+  if (flow.step === 'declaration' && flow.reason && isDeclarationQuestion(question)) {
+    return declarationUnknownStep(flow.orderId, flow.reason);
+  }
+
   // 带单号的查单和政策提问交给后续路径，当前步骤与已收集信息保持不变。
   if (containsOrderToken(question) || isQuestionLike(question)) {
     return null;
@@ -340,15 +365,7 @@ export function handleExchangeFlow(
       if (!flow.reason) {
         return reasonStep(flow.orderId);
       }
-      return {
-        status: 'exchange_flow',
-        outcome: 'step',
-        step: 'declaration',
-        orderId: flow.orderId,
-        reason: flow.reason,
-        message: EXCHANGE_FLOW_MESSAGES.declarationUnknown,
-        options: DECLARATION_OPTIONS
-      };
+      return declarationUnknownStep(flow.orderId, flow.reason);
     }
     if (!flow.reason || !deps.tokenHash) {
       return stepResponse(flow);

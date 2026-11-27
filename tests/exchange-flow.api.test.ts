@@ -107,7 +107,7 @@ describe('对话内换货进度持久化', () => {
         await rebuilt.close();
       }
     } finally {
-      rmSync(directory, { recursive: true, force: true });
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -165,7 +165,7 @@ describe('对话内换货进度持久化', () => {
         await app.close();
       }
     } finally {
-      rmSync(directory, { recursive: true, force: true });
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -186,7 +186,7 @@ describe('对话内换货进度持久化', () => {
         await app.close();
       }
     } finally {
-      rmSync(directory, { recursive: true, force: true });
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });

@@ -128,7 +128,8 @@ async function withHarness(
     await run(buildHarness(app, databasePath));
   } finally {
     await app.close();
-    rmSync(directory, { recursive: true, force: true });
+    // Windows 上 SQLite 句柄释放可能滞后，重试删除避免偶发 EPERM。
+    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 

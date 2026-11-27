@@ -23,7 +23,7 @@ function createTempDatabase(): TempDatabase {
     directory,
     databasePath: join(directory, 'shopcare.sqlite'),
     cleanup() {
-      rmSync(directory, { recursive: true, force: true });
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   };
 }

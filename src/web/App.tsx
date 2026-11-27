@@ -25,6 +25,14 @@ import {
 
 const EXAMPLE_QUESTIONS = ['换货期限是多久？', '我收到货以后几天内还能申请换货？'];
 
+/** 服务端把本次 CSP nonce 写入页面；antd 注入的运行时样式需要携带同一值。 */
+function readCspNonce(): string | undefined {
+  if (typeof document === 'undefined') {
+    return undefined;
+  }
+  return document.querySelector<HTMLMetaElement>('meta[name="csp-nonce"]')?.content || undefined;
+}
+
 /** 页面必须让顾客看出本轮是预置、模型生成还是降级答复。 */
 function modeLabel(mode?: ChatMode): string {
   if (mode === 'generated') {
@@ -278,6 +286,7 @@ function FailureMessage({
 export function App() {
   const { draft, setDraft, status, messages, submit, retry, send } = useChat();
   const demoSession = useDemoSession();
+  const cspNonce = readCspNonce();
   const claimedOrder = demoSession.state.kind === 'claimed' ? demoSession.state.order : null;
   const claimPending = demoSession.state.kind === 'pending';
 
@@ -306,6 +315,7 @@ export function App() {
   return (
     <ConfigProvider
       button={{ autoInsertSpace: false }}
+      csp={cspNonce ? { nonce: cspNonce } : undefined}
       theme={{ token: { colorPrimary: '#0f6f5c', borderRadius: 10 } }}
     >
       <div className="chat-page" data-testid="chat-page">

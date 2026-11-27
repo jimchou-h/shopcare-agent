@@ -138,7 +138,7 @@ describe('换货申请在数据卷重建后恢复', () => {
         await rebuilt.close();
       }
     } finally {
-      rmSync(directory, { recursive: true, force: true });
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });

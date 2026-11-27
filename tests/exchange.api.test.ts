@@ -160,7 +160,7 @@ async function withHarness(
     await run(buildHarness(app, databasePath, clock));
   } finally {
     await app.close();
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
@@ -792,7 +792,7 @@ describe('升级前已有的演示订单', () => {
         await app.close();
       }
     } finally {
-      rmSync(directory, { recursive: true, force: true });
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });

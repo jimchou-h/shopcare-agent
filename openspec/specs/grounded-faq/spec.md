@@ -1,7 +1,7 @@
 # grounded-faq Specification
 
 ## Purpose
-TBD - created by archiving change add-grounded-faq. Update Purpose after archive.
+让顾客用自然语言提交售后政策问题，系统基于仓库内的 FAQ 语料检索证据，返回结论、出处标题和政策摘录；证据不足时只给出补充信息引导，不编造结论。
 ## Requirements
 ### Requirement: 基于政策证据回答
 

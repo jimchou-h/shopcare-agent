@@ -1,7 +1,7 @@
 import type { FastifyRequest } from 'fastify';
 
 /** 预览代理或开发工具可能在本机回环地址之间转发，三者视为同一台机器。 */
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 function parseHost(host: string): { hostname: string; port: string } | null {
   try {

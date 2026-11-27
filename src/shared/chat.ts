@@ -9,8 +9,6 @@ export const chatRequestSchema = z.object({
     .min(1, { message: '请输入售后问题。' })
 });
 
-export type ChatRequest = z.infer<typeof chatRequestSchema>;
-
 /** 请求无法处理、生成服务不可用或来源不受信任时返回的稳定错误码，与业务结果区分。 */
 export const chatErrorResponseSchema = z.object({
   status: z.enum(['invalid_request', 'upstream_error', 'forbidden', 'rate_limited']),
@@ -29,8 +27,6 @@ export const faqSourceSchema = z.object({
   /** 语料版本，便于演示环境核对回答依据。 */
   version: z.string()
 });
-
-export type FaqSource = z.infer<typeof faqSourceSchema>;
 
 /** 本轮实际采用的回答来源：预置、模型生成或上游失败后的预置降级。 */
 export const chatModeSchema = z.enum(['preset', 'generated', 'fallback']);
@@ -56,18 +52,6 @@ const insufficientEvidenceResponseSchema = z.object({
  * 查单由服务端确定性处理，结果与模型生成的政策回答分开表示。
  * `found` 携带订单摘要；其余结果只带引导文案，不携带任何订单详情。
  */
-export const orderQueryOutcomeSchema = z.enum([
-  'found',
-  'not_found',
-  'number_required',
-  'invalid_number',
-  'session_required',
-  'ask_separately',
-  'query_hint'
-]);
-
-export type OrderQueryOutcome = z.infer<typeof orderQueryOutcomeSchema>;
-
 export const orderQueryResponseSchema = z.discriminatedUnion('outcome', [
   z.object({
     status: z.literal('order_query'),
@@ -87,8 +71,6 @@ export const orderQueryResponseSchema = z.discriminatedUnion('outcome', [
     message: z.string()
   })
 ]);
-
-export type OrderQueryResponse = z.infer<typeof orderQueryResponseSchema>;
 
 /**
  * 问答接口的响应契约，页面也用它在渲染前校验外部输入。

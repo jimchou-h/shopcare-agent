@@ -27,5 +27,3 @@ export const demoSessionErrorSchema = z.object({
   status: z.enum(['forbidden', 'unavailable', 'rate_limited']),
   message: z.string()
 });
-
-export type DemoSessionError = z.infer<typeof demoSessionErrorSchema>;

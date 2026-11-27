@@ -420,6 +420,45 @@ describe('顾客在问答页查单', () => {
     expect(screen.queryByTestId('order-card')).not.toBeInTheDocument();
   });
 
+  it('缺单号时展示补单号提示，补充后展示订单', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          status: 'order_query',
+          outcome: 'number_required',
+          message: '请提供要查询的订单号，例如「查订单 SC-XXXXXXXXXXXX」。'
+        } satisfies ChatResponse)
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => orderFound
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    const user = userEvent.setup();
+    const input = screen.getByLabelText('你的问题');
+
+    await user.type(input, '查订单');
+    await user.click(screen.getByRole('button', { name: '查询' }));
+
+    expect(await screen.findByTestId('order-message')).toHaveTextContent(
+      '请提供要查询的订单号'
+    );
+
+    await user.clear(input);
+    await user.type(input, demoOrder.orderId);
+    await user.click(screen.getByRole('button', { name: '查询' }));
+
+    expect(await screen.findByTestId('order-id')).toHaveTextContent(demoOrder.orderId);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/chat',
+      expect.objectContaining({ body: JSON.stringify({ question: demoOrder.orderId }) })
+    );
+  });
+
   it('领取失败时展示可重试的提示', async () => {
     vi.stubGlobal(
       'fetch',

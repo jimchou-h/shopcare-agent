@@ -263,3 +263,125 @@ describe('查单的模型边界', () => {
     );
   });
 });
+
+describe('POST /api/chat 查单缺单号时补充', () => {
+  it('先收到补单号提示，下一轮只发自己的单号完成查询', async () => {
+    await withApp(async (app) => {
+      const { cookie, orderId } = await claimCookie(app);
+
+      const prompt = await ask(app, '查订单', { cookie });
+      expect(prompt.json()).toEqual({
+        status: 'order_query',
+        outcome: 'number_required',
+        message: '请提供要查询的订单号，例如「查订单 SC-XXXXXXXXXXXX」。'
+      });
+
+      const result = await ask(app, `  ${orderId.toLowerCase()}  `, { cookie });
+      expect(result.json()).toEqual({
+        status: 'order_query',
+        outcome: 'found',
+        order: { orderId, productName: SEED_PRODUCT, status: '已签收' }
+      });
+
+      // 成功查询后待补状态结束，单独单号不再被自动消费。
+      const after = await ask(app, orderId, { cookie });
+      expect(after.json()).toMatchObject({ status: 'order_query', outcome: 'query_hint' });
+    });
+  });
+
+  it('待补时格式错误的单号得到格式提示，随后仍可修正', async () => {
+    await withApp(async (app) => {
+      const { cookie, orderId } = await claimCookie(app);
+      await ask(app, '查订单', { cookie });
+
+      const invalid = await ask(app, 'SC-123', { cookie });
+      expect(invalid.json()).toEqual({
+        status: 'order_query',
+        outcome: 'invalid_number',
+        message: '订单号格式不正确，请使用 SC- 加 12 位英文字母或数字。'
+      });
+
+      const corrected = await ask(app, orderId, { cookie });
+      expect(corrected.json()).toMatchObject({ outcome: 'found', order: { orderId } });
+    });
+  });
+
+  it('待补时查无结果保留状态，顾客可继续提交正确单号', async () => {
+    await withApp(async (app) => {
+      const { cookie, orderId } = await claimCookie(app);
+      await ask(app, '查订单', { cookie });
+
+      const missing = await ask(app, 'SC-ZZZZZZZZZZZZ', { cookie });
+      expect(missing.json()).toEqual({
+        status: 'order_query',
+        outcome: 'not_found',
+        message: '未找到可查询的订单。'
+      });
+
+      const corrected = await ask(app, orderId, { cookie });
+      expect(corrected.json()).toMatchObject({ outcome: 'found', order: { orderId } });
+    });
+  });
+
+  it('待补时提交明确 FAQ 问题按原流程回答并结束待补', async () => {
+    await withApp(async (app) => {
+      const { cookie, orderId } = await claimCookie(app);
+      await ask(app, '查订单', { cookie });
+
+      const faq = await ask(app, '换货期限是多久？', { cookie });
+      expect(faq.json()).toMatchObject({
+        status: 'answered',
+        mode: 'preset',
+        source: { id: 'faq-exchange-window' }
+      });
+
+      // 待补状态已结束，单独单号回到明确问法提示。
+      const bare = await ask(app, orderId, { cookie });
+      expect(bare.json()).toMatchObject({ status: 'order_query', outcome: 'query_hint' });
+    });
+  });
+
+  it('没有待补状态时单独发单号只提示明确问法', async () => {
+    await withApp(async (app) => {
+      const { cookie, orderId } = await claimCookie(app);
+      const response = await ask(app, orderId, { cookie });
+
+      expect(response.json()).toEqual({
+        status: 'order_query',
+        outcome: 'query_hint',
+        message: '请使用明确的查单问法，例如「查订单 SC-XXXXXXXXXXXX」。'
+      });
+    });
+  });
+
+  it('独立会话不会继承其他访客的待补状态', async () => {
+    await withApp(async (app) => {
+      const visitorA = await claimCookie(app);
+      const visitorB = await claimCookie(app);
+
+      await ask(app, '查订单', { cookie: visitorA.cookie });
+
+      const bare = await ask(app, visitorB.orderId, { cookie: visitorB.cookie });
+      expect(bare.json()).toMatchObject({ status: 'order_query', outcome: 'query_hint' });
+
+      // A 的待补状态不受影响，仍可继续补自己的单号。
+      const followUp = await ask(app, visitorA.orderId, { cookie: visitorA.cookie });
+      expect(followUp.json()).toMatchObject({ outcome: 'found', order: { orderId: visitorA.orderId } });
+    });
+  });
+
+  it('跨来源请求不能进入待补状态', async () => {
+    await withApp(async (app) => {
+      const { cookie, orderId } = await claimCookie(app);
+
+      const rejected = await ask(app, '查订单', {
+        cookie,
+        origin: 'https://evil.example'
+      });
+      expect(rejected.statusCode).toBe(403);
+
+      const bare = await ask(app, orderId, { cookie });
+      expect(bare.json()).toMatchObject({ status: 'order_query', outcome: 'query_hint' });
+    });
+  });
+});

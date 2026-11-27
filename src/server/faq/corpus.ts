@@ -44,7 +44,7 @@ export const FAQ_CORPUS: readonly FaqEntry[] = [
     answer: '申请换货的商品需要保持完好，配件、赠品和原包装齐全。',
     excerpt:
       '申请换货的商品应保持完好，配件、赠品及原包装齐全；已影响二次销售的商品不支持换货。',
-    keywords: ['换货条件', '条件', '拆封', '完好', '配件', '包装', '二次销售']
+    keywords: ['换货条件', '条件', '拆封', '完好', '配件', '包装', '二次销售', '资格', '可以换']
   },
   {
     id: 'faq-exchange-shipping',

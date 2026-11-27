@@ -101,24 +101,40 @@ const DECLARATION_ANSWERS = new Map<string, boolean>([
  * 展示二选一，避免用逐句枚举猜测顾客是不是在问政策。
  */
 const POLICY_TOPIC =
-  /期限|运费|几天|多少天|多久|什么时候|何时|政策|规则|规定|条件|要求|流程|步骤|取消/;
+  /期限|运费|几天|多少天|多久|什么时候|何时|政策|规则|规定|条件|要求|流程|步骤|取消|资格|可以换|能换|能否|换货吗/;
 
-/**
- * 归一化申报回答：保留问号（疑问不当作选择），去掉其它标点和常见确认前后缀。
- *
- * 例如「齐全！」「齐全！确定」「好的，齐全」都归一到「齐全」；
- * 「齐全？」保持问号，继续回到二选一提示。
- */
-function normalizeDeclarationAnswer(question: string): string {
-  return question
-    .replace(/[\s，。、,!！：:；;]/g, '')
-    .replace(/^(好的|好吧|嗯|确定|确认|是|对|行|可以|好)/, '')
-    .replace(/(好的|确定|确认|是|对|行|可以)$/, '');
-}
+/** 可以与选项分处不同标点段的明确确认词。 */
+const CONFIRMATION_SEGMENTS = new Set(['好的', '好吧', '嗯', '确定', '确认', '是', '对', '行', '可以', '好']);
+const NEGATION_SEGMENT = /不|没|未|无|否/;
 
 function parseDeclaration(question: string): ExchangeDeclaration | null {
-  // 只接受明确的选项值；保留问号，避免把「齐全？」当成已选择。
-  const answer = DECLARATION_ANSWERS.get(normalizeDeclarationAnswer(question));
+  // 问号表示疑问，保留下来交给二选一提示，而不是当作已选择。
+  if (/[？?]/.test(question)) {
+    return null;
+  }
+
+  // 先按标点切分：「不，齐全」不能被拼成相反的「不齐全」。
+  const segments = question.split(/[\s，。、,!！：:；;]+/).filter(Boolean);
+  let answer: boolean | undefined;
+  for (const segment of segments) {
+    if (CONFIRMATION_SEGMENTS.has(segment)) {
+      continue;
+    }
+    const value = DECLARATION_ANSWERS.get(segment);
+    if (value === undefined) {
+      // 否定词单独成段时含义不明，交给二选一提示澄清。
+      if (NEGATION_SEGMENT.test(segment)) {
+        return null;
+      }
+      continue;
+    }
+    // 同时出现互相矛盾的选项时不做猜测。
+    if (answer !== undefined && answer !== value) {
+      return null;
+    }
+    answer = value;
+  }
+
   if (answer === undefined) {
     return null;
   }

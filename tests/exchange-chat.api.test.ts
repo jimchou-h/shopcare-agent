@@ -365,7 +365,9 @@ describe('POST /api/chat 在对话内办理换货', () => {
     '看起来没问题吧',
     '都齐全',
     '有缺失',
-    '都完整'
+    '都完整',
+    '不，齐全',
+    '不是，完整'
   ])('自由文本「%s」无法判断时继续询问选择', async (answer) => {
     await withHarness(async (harness) => {
       const { cookie, orderId } = await harness.claim();
@@ -431,12 +433,37 @@ describe('POST /api/chat 在对话内办理换货', () => {
     }
   );
 
+  it('申报步骤询问资格「不可以换货吗」按政策回答', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      await harness.ask('我想换货', { cookie });
+      await harness.ask('质量问题', { cookie });
+
+      const response = await harness.ask('不可以换货吗', { cookie });
+      expect(response.json()).toMatchObject({
+        status: 'answered',
+        source: { id: 'faq-exchange-condition' }
+      });
+      expect(harness.readAll<{ step: string; reason: string }>(
+        'SELECT step, reason FROM exchange_flows'
+      )).toEqual([{ step: 'declaration', reason: 'quality' }]);
+      expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
+
+      const summary = await harness.ask('齐全', { cookie });
+      expect(summary.json()).toMatchObject({
+        outcome: 'summary',
+        summary: { orderId, reason: 'quality' }
+      });
+    });
+  });
+
   it.each([
     '换货期限是多久？',
     '运费谁承担？',
     '几天内可以申请？',
     '什么时候截止？',
-    '换货政策是什么？'
+    '换货政策是什么？',
+    '不可以换货吗'
   ])('申报步骤询问政策「%s」仍转给 FAQ', async (question) => {
     await withHarness(async (harness) => {
       const { cookie, orderId } = await harness.claim();

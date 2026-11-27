@@ -582,6 +582,36 @@ describe('POST /api/exchange/confirm 确认提交换货申请', () => {
     });
   });
 
+  it('其他访客不能凭已提交的确认标识读取他人回执', async () => {
+    await withHarness(async (harness) => {
+      const visitorA = await harness.claim();
+      const visitorB = await harness.claim();
+      const confirmationId = await previewConfirmation(
+        harness,
+        visitorA.cookie,
+        visitorA.orderId
+      );
+      const submitted = await harness.confirm({ confirmationId }, { cookie: visitorA.cookie });
+      expect(submitted.json()).toMatchObject({ outcome: 'submitted' });
+      const applicationId = submitted.json().application.applicationId as string;
+
+      // 幂等命中已提交的确认时仍要校验归属，不能把 A 的回执返回给 B。
+      const foreign = await harness.confirm({ confirmationId }, { cookie: visitorB.cookie });
+      expect(foreign.json()).toEqual({
+        status: 'exchange_application',
+        outcome: 'invalid_confirmation',
+        message: '确认信息已失效，请重新核对换货信息。'
+      });
+      expect(foreign.json()).not.toHaveProperty('application');
+      expect(JSON.stringify(foreign.json())).not.toContain(applicationId);
+
+      const rows = harness.readAll<{ application_id: string }>(
+        'SELECT application_id FROM exchange_applications'
+      );
+      expect(rows).toEqual([{ application_id: applicationId }]);
+    });
+  });
+
   it('无效确认标识与非法请求体得到稳定结果', async () => {
     await withHarness(async (harness) => {
       const { cookie } = await harness.claim();

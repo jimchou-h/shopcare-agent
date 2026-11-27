@@ -163,10 +163,12 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
     WHERE confirmation_id = ?
   `);
   const findApplicationByConfirmation = db.prepare(`
-    SELECT application_id, status FROM exchange_applications WHERE confirmation_id = ?
+    SELECT application_id, visitor_id, order_id, status
+    FROM exchange_applications
+    WHERE confirmation_id = ?
   `);
   const findApplicationByOrder = db.prepare(`
-    SELECT application_id, status FROM exchange_applications WHERE order_id = ?
+    SELECT application_id, visitor_id, status FROM exchange_applications WHERE order_id = ?
   `);
   const findOwnedApplication = db.prepare(`
     SELECT application_id, status FROM exchange_applications WHERE order_id = ? AND visitor_id = ?
@@ -232,11 +234,14 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
     confirmExchange(input) {
       db.exec('BEGIN IMMEDIATE');
       try {
-        // 已完成的确认直接返回原申请，响应丢失后的重试因此安全。
+        // 已完成的确认直接返回原申请，响应丢失后的重试因此安全；
+        // 但必须先校验归属，避免其他访客凭确认标识拿到他人回执。
         const existing = findApplicationByConfirmation.get(input.confirmationId);
         if (existing) {
           db.exec('COMMIT');
-          return { outcome: 'submitted', application: toApplication(existing) };
+          return String(existing.visitor_id) === input.visitorId
+            ? { outcome: 'submitted', application: toApplication(existing) }
+            : { outcome: 'invalid_confirmation' };
         }
 
         const summary = findSummary.get(input.confirmationId);
@@ -252,11 +257,13 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
 
         const orderId = String(summary.order_id);
 
-        // 同一订单已有申请时复用原结果，保持「一单一申请」。
+        // 同一订单已有申请时复用原结果，保持「一单一申请」；归属不符按无效确认处理。
         const applicationForOrder = findApplicationByOrder.get(orderId);
         if (applicationForOrder) {
           db.exec('COMMIT');
-          return { outcome: 'submitted', application: toApplication(applicationForOrder) };
+          return String(applicationForOrder.visitor_id) === input.visitorId
+            ? { outcome: 'submitted', application: toApplication(applicationForOrder) }
+            : { outcome: 'invalid_confirmation' };
         }
 
         if (summary.consumed_at !== null) {
@@ -320,15 +327,25 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
         db.exec('ROLLBACK');
 
         // 唯一约束兜底：并发写入方已提交同一确认或同一订单时，返回已存在的结果。
+        // 与主路径一致，命中已有申请时先校验归属，不向其他访客泄露回执。
         if (isUniqueConstraintError(error)) {
           const existing = findApplicationByConfirmation.get(input.confirmationId);
           if (existing) {
-            return { outcome: 'submitted', application: toApplication(existing) };
+            return String(existing.visitor_id) === input.visitorId
+              ? { outcome: 'submitted', application: toApplication(existing) }
+              : { outcome: 'invalid_confirmation' };
           }
           const summary = findSummary.get(input.confirmationId);
-          if (summary) {
+          if (
+            summary &&
+            String(summary.visitor_id) === input.visitorId &&
+            String(summary.token_hash) === input.tokenHash
+          ) {
             const applicationForOrder = findApplicationByOrder.get(String(summary.order_id));
-            if (applicationForOrder) {
+            if (
+              applicationForOrder &&
+              String(applicationForOrder.visitor_id) === input.visitorId
+            ) {
               return { outcome: 'submitted', application: toApplication(applicationForOrder) };
             }
           }

@@ -77,9 +77,11 @@ export function App() {
           >
             {demoSession.state.kind === 'pending'
               ? '领取中…'
-              : demoSession.state.kind === 'claimed'
-                ? '再次领取'
-                : '领取示例订单'}
+              : demoSession.state.kind === 'failed'
+                ? '重试领取'
+                : demoSession.state.kind === 'claimed'
+                  ? '再次领取'
+                  : '领取示例订单'}
           </button>
         </div>
       </section>

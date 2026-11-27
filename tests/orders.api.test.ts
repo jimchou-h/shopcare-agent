@@ -1,6 +1,7 @@
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import { buildApp, type BuildAppOptions } from '../src/server/app';
+import type { DemoRepository } from '../src/server/demo-session/repository';
 import type { DemoSessionResponse } from '../src/shared/orders';
 import type { ChatResponse } from '../src/shared/chat';
 
@@ -117,6 +118,67 @@ describe('POST /api/demo/session 领取示例订单', () => {
       expect(response.statusCode).toBe(403);
       expect(response.headers['set-cookie']).toBeUndefined();
     });
+  });
+
+  it.each([
+    'text/plain;charset=UTF-8',
+    'application/x-www-form-urlencoded'
+  ])('兼容附带 %s 的领取请求', async (contentType) => {
+    await withApp(async (app) => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/demo/session',
+        headers: { host: HOST, origin: SAME_ORIGIN, 'content-type': contentType },
+        payload: 'ignored'
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json<DemoSessionResponse>().status).toBe('claimed');
+    });
+  });
+
+  it.each([
+    { label: 'localhost 页面访问 127.0.0.1', host: '127.0.0.1:3201', origin: 'http://localhost:3201' },
+    { label: '127.0.0.1 页面访问 localhost', host: 'localhost:3201', origin: 'http://127.0.0.1:3201' }
+  ])('$label 仍视为同源', async ({ host, origin }) => {
+    await withApp(async (app) => {
+      const response = await claim(app, { host, origin });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json<DemoSessionResponse>().status).toBe('claimed');
+    });
+  });
+
+  it('存储不可用时返回稳定的领取失败提示', async () => {
+    const broken: DemoRepository = {
+      claimSession() {
+        throw new Error('db down');
+      },
+      findSession() {
+        return null;
+      },
+      setPending() {
+        // 该测试只验证领取失败。
+      },
+      findOrder() {
+        return null;
+      },
+      close() {
+        // 注入的替身由测试持有。
+      }
+    };
+    const app = buildApp({ repository: broken });
+    try {
+      const response = await claim(app);
+
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toEqual({
+        status: 'unavailable',
+        message: '领取服务暂时不可用，请稍后重试。'
+      });
+    } finally {
+      await app.close();
+    }
   });
 });
 

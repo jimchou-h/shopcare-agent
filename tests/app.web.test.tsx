@@ -360,6 +360,14 @@ describe('顾客在问答页查单', () => {
     await user.click(screen.getByRole('button', { name: '领取示例订单' }));
 
     expect(await screen.findByText(`已领取 ${demoOrder.orderId} · ${demoOrder.productName}`)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/demo/session',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}'
+      })
+    );
 
     await user.click(screen.getByRole('button', { name: '查询示例订单' }));
     expect(screen.getByLabelText('你的问题')).toHaveValue(`查订单 ${demoOrder.orderId}`);
@@ -459,15 +467,22 @@ describe('顾客在问答页查单', () => {
     );
   });
 
-  it('领取失败时展示可重试的提示', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
+  it('领取失败时展示服务端提示并可通过重试完成领取', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
         ok: false,
         status: 503,
-        json: async () => ({ status: 'unavailable', message: '领取服务暂时不可用，请稍后重试。' })
+        json: async () => ({
+          status: 'unavailable',
+          message: '领取服务暂时不可用，请稍后重试。'
+        })
       })
-    );
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => claimed
+      });
+    vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
     const user = userEvent.setup();
@@ -475,6 +490,11 @@ describe('顾客在问答页查单', () => {
     await user.click(screen.getByRole('button', { name: '领取示例订单' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('领取服务暂时不可用，请稍后重试。');
-    expect(screen.getByRole('button', { name: '领取示例订单' })).toBeEnabled();
+
+    const retry = await screen.findByRole('button', { name: '重试领取' });
+    await user.click(retry);
+
+    expect(await screen.findByText(`已领取 ${demoOrder.orderId} · ${demoOrder.productName}`)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

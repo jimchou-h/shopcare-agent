@@ -40,6 +40,9 @@ export function useDemoSession() {
     try {
       const response = await fetch('/api/demo/session', {
         method: 'POST',
+        // 显式发送 JSON，避免代理或客户端附加其他 Content-Type 时被服务端拒绝。
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
         signal: controller.signal
       });
 

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Alert, Button, Card, Descriptions, Flex, Typography } from 'antd';
 import {
   exchangeConfirmResponseSchema,
   exchangeErrorResponseSchema,
@@ -6,7 +7,6 @@ import {
   type ExchangeSummary
 } from '../../shared/exchange';
 import type { FaqSource } from '../../shared/faq';
-import { ApplicationReceipt, SourceList } from './exchange-panel';
 
 const DEFAULT_FAILURE_MESSAGE = '换货服务暂时不可用，请稍后重试。';
 
@@ -31,6 +31,46 @@ async function readErrorMessage(response: Response): Promise<string> {
     // 响应体不是约定的错误结构时保留通用文案。
   }
   return DEFAULT_FAILURE_MESSAGE;
+}
+
+/** 政策出处统一用 antd 卡片呈现，便于问答与换货消息复用。 */
+export function SourceList({ sources }: { sources: FaqSource[] }) {
+  return (
+    <Flex vertical gap={8} data-testid="exchange-sources">
+      {sources.map((source) => (
+        <Card
+          key={source.id}
+          size="small"
+          type="inner"
+          title={<span data-testid="source-title">{source.title}</span>}
+        >
+          <Typography.Paragraph data-testid="source-excerpt" style={{ marginBottom: 8 }}>
+            {source.excerpt}
+          </Typography.Paragraph>
+          <Typography.Text type="secondary">
+            FAQ {source.id} · 语料版本 {source.version}
+          </Typography.Text>
+        </Card>
+      ))}
+    </Flex>
+  );
+}
+
+/** 已受理的换货申请回执；消息与订单查询共用。 */
+export function ApplicationReceipt({ application }: { application: ExchangeApplication }) {
+  return (
+    <Alert
+      type="success"
+      showIcon
+      data-testid="exchange-receipt"
+      title={
+        <span>
+          换货申请已提交 ·{' '}
+          <span data-testid="exchange-application-id">{application.applicationId}</span>
+        </span>
+      }
+    />
+  );
 }
 
 /**
@@ -84,58 +124,64 @@ export function ExchangeSummaryCard({
 
   if (state.kind === 'ineligible') {
     return (
-      <div className="answer answer--guide" data-testid="exchange-ineligible">
-        <p className="answer__eyebrow">暂不能申请换货</p>
-        <p className="answer__text">{state.message}</p>
+      <Flex vertical gap={8} data-testid="exchange-ineligible">
+        <Alert type="warning" showIcon title="暂不能申请换货" description={state.message} />
         <SourceList sources={state.sources} />
-      </div>
+      </Flex>
     );
   }
 
   if (state.kind === 'notice' || state.kind === 'failed') {
     return (
-      <div className="answer answer--muted" data-testid="exchange-notice">
-        <p className="answer__text">{state.message}</p>
-        {state.kind === 'failed' && (
-          <button className="retry" type="button" onClick={() => void requestConfirm()}>
-            重试
-          </button>
-        )}
-      </div>
+      <Alert
+        type="warning"
+        showIcon
+        data-testid="exchange-notice"
+        title={state.message}
+        action={
+          state.kind === 'failed' ? (
+            <Button size="small" onClick={() => void requestConfirm()}>
+              重试
+            </Button>
+          ) : undefined
+        }
+      />
     );
   }
 
   return (
-    <div className="exchange__summary" data-testid="exchange-summary">
-      <p className="exchange__title">待确认的换货申请</p>
-      <dl className="order__meta">
-        <div>
-          <dt>订单号</dt>
-          <dd>{summary.orderId}</dd>
-        </div>
-        <div>
-          <dt>商品</dt>
-          <dd>{summary.productName}</dd>
-        </div>
-        <div>
-          <dt>换货原因</dt>
-          <dd data-testid="exchange-reason-label">{summary.reasonLabel}</dd>
-        </div>
-      </dl>
-      <p className="exchange__shipping" data-testid="exchange-shipping">
-        {summary.shipping.note}
-      </p>
+    <Card size="small" title="待确认的换货申请" data-testid="exchange-summary">
+      <Descriptions
+        size="small"
+        column={1}
+        items={[
+          { key: 'order', label: '订单号', children: summary.orderId },
+          { key: 'product', label: '商品', children: summary.productName },
+          {
+            key: 'reason',
+            label: '换货原因',
+            children: (
+              <span data-testid="exchange-reason-label">{summary.reasonLabel}</span>
+            )
+          }
+        ]}
+      />
+      <Alert
+        type="info"
+        data-testid="exchange-shipping"
+        title={summary.shipping.note}
+        style={{ margin: '12px 0' }}
+      />
       <SourceList sources={summary.sources} />
-      <div className="exchange__actions">
-        <button
-          className="ask__submit"
-          type="button"
-          disabled={state.kind === 'pending'}
-          onClick={() => void requestConfirm()}
-        >
-          {state.kind === 'pending' ? '提交中…' : '确认提交'}
-        </button>
-      </div>
-    </div>
+      <Button
+        type="primary"
+        block
+        loading={state.kind === 'pending'}
+        onClick={() => void requestConfirm()}
+        style={{ marginTop: 12 }}
+      >
+        确认提交
+      </Button>
+    </Card>
   );
 }

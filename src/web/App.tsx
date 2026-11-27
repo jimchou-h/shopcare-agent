@@ -1,9 +1,27 @@
 import { useEffect, type FormEvent } from 'react';
+import {
+  Alert,
+  Avatar,
+  Button,
+  Card,
+  ConfigProvider,
+  Descriptions,
+  Empty,
+  Flex,
+  Input,
+  Space,
+  Spin,
+  Tag,
+  Typography
+} from 'antd';
 import type { ChatMode, ChatResponse } from '../shared/chat';
 import { useChat } from './chat/use-chat';
 import { useDemoSession } from './demo-session/use-demo-session';
-import { ExchangePanel, ApplicationReceipt, SourceList } from './exchange/exchange-panel';
-import { ExchangeSummaryCard } from './exchange/exchange-summary';
+import {
+  ApplicationReceipt,
+  ExchangeSummaryCard,
+  SourceList
+} from './exchange/exchange-message';
 
 const EXAMPLE_QUESTIONS = ['换货期限是多久？', '我收到货以后几天内还能申请换货？'];
 
@@ -34,26 +52,25 @@ function ExchangeFlowMessage({
   switch (response.outcome) {
     case 'step':
       return (
-        <article className="answer" data-testid="exchange-step">
-          <p className="answer__mode">换货办理 · 本地引导</p>
-          <p className="chat__meta">示例订单 · {response.orderId}</p>
-          <p className="answer__text" data-testid="exchange-step-message">
+        <Card size="small" data-testid="exchange-step">
+          <Typography.Text type="secondary">换货办理 · 本地引导</Typography.Text>
+          <Typography.Paragraph type="secondary" style={{ margin: '4px 0 8px' }}>
+            示例订单 · {response.orderId}
+          </Typography.Paragraph>
+          <Typography.Paragraph strong data-testid="exchange-step-message" style={{ marginBottom: 8 }}>
             {response.message}
-          </p>
-          <div className="chat__options">
+          </Typography.Paragraph>
+          <Space wrap>
             {response.options.map((option) => (
-              <button
-                className="examples__item"
-                type="button"
-                key={option}
-                onClick={() => onSend(option)}
-              >
+              <Button key={option} size="small" onClick={() => onSend(option)}>
                 {option}
-              </button>
+              </Button>
             ))}
-          </div>
-          <p className="chat__hint">回复「继续换货」恢复当前步骤，回复「取消换货」结束办理。</p>
-        </article>
+          </Space>
+          <Typography.Paragraph type="secondary" style={{ margin: '10px 0 0', fontSize: 12 }}>
+            回复「继续换货」恢复当前步骤，回复「取消换货」结束办理。
+          </Typography.Paragraph>
+        </Card>
       );
     case 'summary':
       return (
@@ -64,38 +81,46 @@ function ExchangeFlowMessage({
       );
     case 'ineligible':
       return (
-        <article className="answer answer--guide" data-testid="exchange-ineligible">
-          <p className="answer__eyebrow">暂不能申请换货</p>
-          <p className="answer__text" data-testid="exchange-flow-message">
-            {response.message}
-          </p>
+        <Flex vertical gap={8} data-testid="exchange-ineligible">
+          <Alert
+            type="warning"
+            showIcon
+            title="暂不能申请换货"
+            description={<span data-testid="exchange-flow-message">{response.message}</span>}
+          />
           <SourceList sources={response.sources} />
-        </article>
+        </Flex>
       );
     case 'already_submitted':
       return (
-        <article className="answer" data-testid="exchange-flow-message">
-          <p className="answer__text">{response.message}</p>
+        <Flex vertical gap={8} data-testid="exchange-flow-message">
+          <Typography.Text>{response.message}</Typography.Text>
           <ApplicationReceipt application={response.application} />
-        </article>
+        </Flex>
       );
     case 'cancelled':
     case 'notice':
       return (
-        <article className="answer answer--guide" data-testid="exchange-notice">
-          <p className="answer__text" data-testid="exchange-flow-message">
-            {response.message}
-          </p>
-        </article>
+        <Alert
+          type="warning"
+          showIcon
+          data-testid="exchange-notice"
+          title={<span data-testid="exchange-flow-message">{response.message}</span>}
+        />
       );
     case 'session_required':
       return (
-        <article className="answer answer--guide" data-testid="exchange-notice">
-          <p className="answer__text">{response.message}</p>
-          <button className="retry" type="button" onClick={onClaim} disabled={claimPending}>
-            去领取示例订单
-          </button>
-        </article>
+        <Alert
+          type="warning"
+          showIcon
+          data-testid="exchange-notice"
+          title={response.message}
+          action={
+            <Button size="small" onClick={onClaim} loading={claimPending}>
+              去领取示例订单
+            </Button>
+          }
+        />
       );
   }
 }
@@ -115,78 +140,98 @@ function AssistantMessage({
 }) {
   if (response.status === 'answered') {
     return (
-      <article className="answer">
-        <p className="answer__mode" data-testid="answer-mode">
-          {modeLabel(response.mode)}
-        </p>
-        <p className="answer__question" data-testid="answer-question">{question}</p>
-        <p className="answer__text" data-testid="answer-text">{response.answer}</p>
-        <div className="source" data-testid="answer-source">
-          <p className="source__heading">
-            政策依据 · <span data-testid="source-title">{response.source.title}</span>
-          </p>
-          <blockquote data-testid="source-excerpt">{response.source.excerpt}</blockquote>
-          <p className="source__meta">
-            FAQ {response.source.id} · 语料版本 {response.source.version}
-          </p>
+      <Card size="small" data-testid="assistant-answer">
+        <Space size={6} wrap style={{ marginBottom: 8 }}>
+          <Tag color="green" data-testid="answer-mode">
+            {modeLabel(response.mode)}
+          </Tag>
+          <Typography.Text type="secondary" data-testid="answer-question">
+            你问：{question}
+          </Typography.Text>
+        </Space>
+        <Typography.Paragraph strong data-testid="answer-text" style={{ fontSize: 16 }}>
+          {response.answer}
+        </Typography.Paragraph>
+        <div data-testid="answer-source">
+          <Typography.Text strong>政策依据</Typography.Text>
+          <div style={{ marginTop: 8 }}>
+            <SourceList sources={[response.source]} />
+          </div>
         </div>
-      </article>
+      </Card>
     );
   }
 
   if (response.status === 'insufficient_evidence') {
     return (
-      <article className="answer answer--guide" data-testid="insufficient">
-        {response.mode && (
-          <p className="answer__mode" data-testid="answer-mode">
-            {modeLabel(response.mode)}
-          </p>
-        )}
-        <p className="answer__eyebrow">需要补充信息</p>
-        <p className="answer__text" data-testid="insufficient-message">
-          {response.message}
-        </p>
-      </article>
+      <Alert
+        type="warning"
+        showIcon
+        data-testid="insufficient"
+        title={
+          <Space size={6} wrap>
+            {response.mode && (
+              <Tag data-testid="answer-mode">{modeLabel(response.mode)}</Tag>
+            )}
+            <span>需要补充信息</span>
+          </Space>
+        }
+        description={<span data-testid="insufficient-message">{response.message}</span>}
+      />
     );
   }
 
   if (response.status === 'order_query') {
     if (response.outcome === 'found') {
       return (
-        <article className="order" data-testid="order-card">
-          <p className="answer__mode">示例订单 · 本地查询</p>
-          <p className="order__id" data-testid="order-id">{response.order.orderId}</p>
-          <dl className="order__meta">
-            <div>
-              <dt>商品</dt>
-              <dd data-testid="order-product">{response.order.productName}</dd>
-            </div>
-            <div>
-              <dt>订单状态</dt>
-              <dd data-testid="order-status">{response.order.status}</dd>
-            </div>
-          </dl>
-          <ExchangePanel
-            key={response.order.orderId}
-            order={response.order}
-            application={response.exchange}
+        <Card size="small" data-testid="order-card">
+          <Space size={8} wrap style={{ marginBottom: 12 }}>
+            <Typography.Text strong style={{ fontSize: 18 }} data-testid="order-id">
+              {response.order.orderId}
+            </Typography.Text>
+            <Tag color="green" data-testid="order-status">
+              {response.order.status}
+            </Tag>
+          </Space>
+          <Descriptions
+            size="small"
+            column={1}
+            items={[
+              {
+                key: 'product',
+                label: '商品',
+                children: <span data-testid="order-product">{response.order.productName}</span>
+              }
+            ]}
           />
-        </article>
+          <div style={{ marginTop: 12 }}>
+            {response.exchange ? (
+              <ApplicationReceipt application={response.exchange} />
+            ) : (
+              <Typography.Text type="secondary">
+                回复「我想换货」可在对话里继续办理换货。
+              </Typography.Text>
+            )}
+          </div>
+        </Card>
       );
     }
 
     return (
-      <article className="answer answer--guide" data-testid="order-guidance">
-        <p className="answer__eyebrow">订单查询</p>
-        <p className="answer__text" data-testid="order-message">
-          {response.message}
-        </p>
-        {response.outcome === 'session_required' && (
-          <button className="retry" type="button" onClick={onClaim} disabled={claimPending}>
-            去领取示例订单
-          </button>
-        )}
-      </article>
+      <Alert
+        type="warning"
+        showIcon
+        data-testid="order-guidance"
+        title="订单查询"
+        description={<span data-testid="order-message">{response.message}</span>}
+        action={
+          response.outcome === 'session_required' ? (
+            <Button size="small" onClick={onClaim} loading={claimPending}>
+              去领取示例订单
+            </Button>
+          ) : undefined
+        }
+      />
     );
   }
 
@@ -196,6 +241,36 @@ function AssistantMessage({
       onSend={onSend}
       onClaim={onClaim}
       claimPending={claimPending}
+    />
+  );
+}
+
+function FailureMessage({
+  message,
+  onRetry
+}: {
+  message: { question: string; message: string };
+  onRetry: () => void;
+}) {
+  return (
+    <Alert
+      type="error"
+      showIcon
+      data-testid="request-failed"
+      title="未完成的问题"
+      description={
+        <Flex vertical gap={6}>
+          <Typography.Text strong data-testid="failed-question">
+            {message.question}
+          </Typography.Text>
+          <span data-testid="failure-message">{message.message}</span>
+          <div>
+            <Button size="small" onClick={onRetry}>
+              重试
+            </Button>
+          </div>
+        </Flex>
+      }
     />
   );
 }
@@ -220,129 +295,151 @@ export function App() {
     submit();
   }
 
+  const claimLabel = claimPending
+    ? '领取中…'
+    : demoSession.state.kind === 'failed'
+      ? '重试领取'
+      : demoSession.state.kind === 'claimed'
+        ? '再次领取'
+        : '领取示例订单';
+
   return (
-    <main className="page">
-      <header className="hero">
-        <p className="eyebrow">ShopCare</p>
-        <h1>售后政策助手</h1>
-        <p className="lede">
-          输入售后问题，查看结论和它依据的政策原文。演示使用合成示例数据。
-        </p>
-      </header>
-
-      <section className="demo" aria-label="示例订单">
-        <div>
-          <p className="demo__title">示例订单</p>
-          <p className="demo__hint">
-            {demoSession.state.kind === 'claimed'
-              ? `已领取 ${demoSession.state.order.orderId} · ${demoSession.state.order.productName}`
-              : '领取一笔合成示例订单后，可以直接查询它的状态。'}
-          </p>
+    <ConfigProvider
+      button={{ autoInsertSpace: false }}
+      theme={{ token: { colorPrimary: '#0f6f5c', borderRadius: 10 } }}
+    >
+      <div className="chat-page" data-testid="chat-page">
+        <header className="chat-header">
+          <Flex align="center" justify="space-between" gap={12} wrap>
+            <div>
+              <Typography.Title level={4} style={{ margin: 0 }}>
+                ShopCare 售后助手
+              </Typography.Title>
+              <Typography.Text type="secondary">
+                输入售后问题，查看结论和它依据的政策原文。演示使用合成示例数据。
+              </Typography.Text>
+            </div>
+            <Space wrap>
+              {claimedOrder && (
+                <Button onClick={() => setDraft(`查订单 ${claimedOrder.orderId}`)}>
+                  查询示例订单
+                </Button>
+              )}
+              <Button type="primary" onClick={demoSession.claim} loading={claimPending}>
+                {claimLabel}
+              </Button>
+            </Space>
+          </Flex>
+          {demoSession.state.kind === 'claimed' && (
+            <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+              已领取 {demoSession.state.order.orderId} · {demoSession.state.order.productName}
+            </Typography.Text>
+          )}
           {demoSession.state.kind === 'failed' && (
-            <p className="ask__error" role="alert">
-              {demoSession.state.message}
-            </p>
+            <Alert type="error" showIcon title={demoSession.state.message} style={{ marginTop: 8 }} />
           )}
-        </div>
-        <div className="demo__actions">
-          {claimedOrder && (
-            <button
-              className="retry"
-              type="button"
-              onClick={() => setDraft(`查订单 ${claimedOrder.orderId}`)}
-            >
-              查询示例订单
-            </button>
-          )}
-          <button
-            className="claim"
-            type="button"
-            onClick={demoSession.claim}
-            disabled={claimPending}
+        </header>
+
+        <div className="chat-body">
+          <div
+            className="chat-messages"
+            data-testid="conversation"
+            role="log"
+            aria-live="polite"
           >
-            {claimPending
-              ? '领取中…'
-              : demoSession.state.kind === 'failed'
-                ? '重试领取'
-                : demoSession.state.kind === 'claimed'
-                  ? '再次领取'
-                  : '领取示例订单'}
-          </button>
-        </div>
-      </section>
-
-      <form className="ask" onSubmit={handleSubmit} aria-label="售后问题表单">
-        <label className="ask__label" htmlFor="question">
-          你的问题
-        </label>
-        <div className="ask__row">
-          <input
-            id="question"
-            name="question"
-            className="ask__input"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="例如：换货期限是多久？"
-            autoComplete="off"
-            aria-invalid={status === 'invalid'}
-            aria-describedby={status === 'invalid' ? 'question-error' : undefined}
-          />
-          <button className="ask__submit" type="submit" disabled={status === 'pending'}>
-            {status === 'pending' ? '查询中…' : '查询'}
-          </button>
-        </div>
-        {status === 'invalid' && (
-          <p className="ask__error" id="question-error" role="alert">
-            请输入售后问题。
-          </p>
-        )}
-        <div className="examples">
-          <span>试试：</span>
-          {EXAMPLE_QUESTIONS.map((example) => (
-            <button
-              className="examples__item"
-              type="button"
-              key={example}
-              onClick={() => setDraft(example)}
-            >
-              {example}
-            </button>
-          ))}
-        </div>
-      </form>
-
-      <section className="conversation" aria-live="polite">
-        {messages.length === 0 && status === 'idle' && (
-          <p className="hint">提交问题后，这里会显示回答与对应出处。</p>
-        )}
-        {messages.map((message) => (
-          <div className="chat__turn" key={message.id}>
-            {message.role === 'user' && (
-              <p className="chat__user" data-testid="user-message">{message.text}</p>
-            )}
-            {message.role === 'failure' && (
-              <article className="answer answer--muted" data-testid="request-failed">
-                <p className="answer__eyebrow">未完成的问题</p>
-                <p className="answer__failed-question" data-testid="failed-question">
-                  {message.question}
-                </p>
-                <p className="answer__text" data-testid="failure-message">{message.message}</p>
-                <button className="retry" type="button" onClick={retry}>重试</button>
-              </article>
-            )}
-            {message.role === 'assistant' && (
-              <AssistantMessage
-                question={message.question}
-                response={message.response}
-                onSend={send}
-                onClaim={demoSession.claim}
-                claimPending={claimPending}
+            {messages.length === 0 && status === 'idle' && (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="提交问题后，这里会显示回答与对应出处。"
               />
             )}
+            {messages.map((message) => (
+              <div
+                className={`msg-row${message.role === 'user' ? ' msg-row--user' : ''}`}
+                key={message.id}
+              >
+                {message.role !== 'user' && (
+                  <Avatar className="msg-avatar" size={32}>
+                    AI
+                  </Avatar>
+                )}
+                <div className="msg-content">
+                  {message.role === 'user' && (
+                    <div className="msg-bubble" data-testid="user-message">
+                      {message.text}
+                    </div>
+                  )}
+                  {message.role === 'assistant' && (
+                    <AssistantMessage
+                      question={message.question}
+                      response={message.response}
+                      onSend={send}
+                      onClaim={demoSession.claim}
+                      claimPending={claimPending}
+                    />
+                  )}
+                  {message.role === 'failure' && (
+                    <FailureMessage
+                      message={message}
+                      onRetry={retry}
+                    />
+                  )}
+                </div>
+              </div>
+            ))}
+            {status === 'pending' && (
+              <Flex align="center" gap={8}>
+                <Spin size="small" />
+                <Typography.Text type="secondary">
+                  正在查找可支持回答的政策依据…
+                </Typography.Text>
+              </Flex>
+            )}
           </div>
-        ))}
-        {status === 'pending' && <p className="hint">正在查找可支持回答的政策依据…</p>}
-      </section>
-    </main>
+
+          <div className="chat-composer" data-testid="composer">
+            <form onSubmit={handleSubmit} aria-label="售后问题表单">
+              <Flex gap={8}>
+                <Input
+                  id="question"
+                  name="question"
+                  aria-label="你的问题"
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  placeholder="例如：换货期限是多久？"
+                  autoComplete="off"
+                  status={status === 'invalid' ? 'error' : undefined}
+                  aria-describedby={status === 'invalid' ? 'question-error' : undefined}
+                />
+                <Button type="primary" htmlType="submit" loading={status === 'pending'}>
+                  查询
+                </Button>
+              </Flex>
+              {status === 'invalid' && (
+                <Alert
+                  type="error"
+                  showIcon
+                  id="question-error"
+                  title="请输入售后问题。"
+                  style={{ marginTop: 8 }}
+                />
+              )}
+              <Space wrap size={4} style={{ marginTop: 8 }}>
+                <Typography.Text type="secondary">试试：</Typography.Text>
+                {EXAMPLE_QUESTIONS.map((example) => (
+                  <Button
+                    key={example}
+                    size="small"
+                    onClick={() => setDraft(example)}
+                  >
+                    {example}
+                  </Button>
+                ))}
+              </Space>
+            </form>
+          </div>
+        </div>
+      </div>
+    </ConfigProvider>
   );
 }

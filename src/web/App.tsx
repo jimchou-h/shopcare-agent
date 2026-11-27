@@ -1,6 +1,7 @@
 import { useEffect, type FormEvent } from 'react';
 import type { ChatMode } from '../shared/chat';
 import { useChat } from './chat/use-chat';
+import { useDemoSession } from './demo-session/use-demo-session';
 
 const EXAMPLE_QUESTIONS = ['换货期限是多久？', '我收到货以后几天内还能申请换货？'];
 
@@ -17,6 +18,8 @@ function modeLabel(mode?: ChatMode): string {
 
 export function App() {
   const { draft, setDraft, state, submit, retry } = useChat();
+  const demoSession = useDemoSession();
+  const claimedOrder = demoSession.state.kind === 'claimed' ? demoSession.state.order : null;
 
   useEffect(() => {
     try {
@@ -41,6 +44,45 @@ export function App() {
           输入售后问题，查看结论和它依据的政策原文。演示使用合成示例数据。
         </p>
       </header>
+
+      <section className="demo" aria-label="示例订单">
+        <div>
+          <p className="demo__title">示例订单</p>
+          <p className="demo__hint">
+            {demoSession.state.kind === 'claimed'
+              ? `已领取 ${demoSession.state.order.orderId} · ${demoSession.state.order.productName}`
+              : '领取一笔合成示例订单后，可以直接查询它的状态。'}
+          </p>
+          {demoSession.state.kind === 'failed' && (
+            <p className="ask__error" role="alert">
+              {demoSession.state.message}
+            </p>
+          )}
+        </div>
+        <div className="demo__actions">
+          {claimedOrder && (
+            <button
+              className="retry"
+              type="button"
+              onClick={() => setDraft(`查订单 ${claimedOrder.orderId}`)}
+            >
+              查询示例订单
+            </button>
+          )}
+          <button
+            className="claim"
+            type="button"
+            onClick={demoSession.claim}
+            disabled={demoSession.state.kind === 'pending'}
+          >
+            {demoSession.state.kind === 'pending'
+              ? '领取中…'
+              : demoSession.state.kind === 'claimed'
+                ? '再次领取'
+                : '领取示例订单'}
+          </button>
+        </div>
+      </section>
 
       <form className="ask" onSubmit={handleSubmit} aria-label="售后问题表单">
         <label className="ask__label" htmlFor="question">
@@ -87,6 +129,41 @@ export function App() {
           <p className="hint">提交问题后，这里会显示回答与对应出处。</p>
         )}
         {state.kind === 'pending' && <p className="hint">正在查找可支持回答的政策依据…</p>}
+        {state.kind === 'result' && state.response.status === 'order_query' && (
+          state.response.outcome === 'found' ? (
+            <article className="order" data-testid="order-card">
+              <p className="answer__mode">示例订单 · 本地查询</p>
+              <p className="order__id" data-testid="order-id">{state.response.order.orderId}</p>
+              <dl className="order__meta">
+                <div>
+                  <dt>商品</dt>
+                  <dd data-testid="order-product">{state.response.order.productName}</dd>
+                </div>
+                <div>
+                  <dt>订单状态</dt>
+                  <dd data-testid="order-status">{state.response.order.status}</dd>
+                </div>
+              </dl>
+            </article>
+          ) : (
+            <article className="answer answer--guide" data-testid="order-guidance">
+              <p className="answer__eyebrow">订单查询</p>
+              <p className="answer__text" data-testid="order-message">
+                {state.response.message}
+              </p>
+              {state.response.outcome === 'session_required' && (
+                <button
+                  className="retry"
+                  type="button"
+                  onClick={demoSession.claim}
+                  disabled={demoSession.state.kind === 'pending'}
+                >
+                  去领取示例订单
+                </button>
+              )}
+            </article>
+          )
+        )}
         {state.kind === 'result' && state.response.status === 'answered' && (
           <article className="answer">
             <p className="answer__mode" data-testid="answer-mode">

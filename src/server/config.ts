@@ -34,7 +34,12 @@ export interface ServerConfig {
   chatMode: DeploymentMode;
   /** 只在真实模式下存在，仅用于服务端直达 DeepSeek 官方端点。 */
   deepseekApiKey?: string;
+  /** SQLite 文件路径；容器通过环境变量指向持久化数据卷。 */
+  databasePath?: string;
 }
+
+/** 本地默认把演示状态写到工作目录下的 data，容器部署会覆盖为数据卷路径。 */
+export const DEFAULT_DATABASE_PATH = 'data/shopcare.sqlite';
 
 /**
  * 解析部署者提供的运行时配置。

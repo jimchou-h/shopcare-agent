@@ -2,6 +2,12 @@ import type { ChatResponse } from '../../shared/chat.js';
 import { FAQ_CORPUS, FAQ_CORPUS_VERSION, type FaqEntry } from './corpus.js';
 import { retrieveFaq } from './retrieve.js';
 
+/** FAQ 只产生政策回答或补充引导，不涉及本地查单结果。 */
+export type FaqAnswer = Extract<
+  ChatResponse,
+  { status: 'answered' | 'insufficient_evidence' }
+>;
+
 /**
  * 把一轮顾客问题转换为带出处的回答。
  *
@@ -12,7 +18,7 @@ import { retrieveFaq } from './retrieve.js';
 export function answerQuestion(
   question: string,
   corpus: readonly FaqEntry[] = FAQ_CORPUS
-): ChatResponse {
+): FaqAnswer {
   const result = retrieveFaq(question, corpus);
 
   if (result.status === 'none') {

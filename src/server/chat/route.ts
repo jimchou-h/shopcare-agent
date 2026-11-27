@@ -5,15 +5,32 @@ import {
 } from '../../shared/chat.js';
 import type { DeploymentMode } from '../config.js';
 import type { DeepSeekGenerator } from '../deepseek/client.js';
+import type { DemoRepository } from '../demo-session/repository.js';
+import { hashSessionToken } from '../demo-session/token.js';
+import { DEMO_SESSION_COOKIE, readCookie } from '../http/cookies.js';
+import { isTrustedSameOrigin } from '../http/same-origin.js';
+import { handleOrderQuestion } from '../orders/query.js';
 import { ChatUpstreamError, answerChatQuestion } from './answer-question.js';
 
 export interface ChatRouteDeps {
   mode: DeploymentMode;
   generate?: DeepSeekGenerator;
+  repository: DemoRepository;
+  now?: () => number;
 }
 
 export function registerChatRoute(app: FastifyInstance, deps: ChatRouteDeps): void {
+  const now = deps.now ?? Date.now;
+
   app.post('/api/chat', async (request, reply) => {
+    if (!isTrustedSameOrigin(request)) {
+      const forbidden: ChatErrorResponse = {
+        status: 'forbidden',
+        message: '请求来源不受信任。'
+      };
+      return reply.code(403).send(forbidden);
+    }
+
     const parsed = chatRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       const error: ChatErrorResponse = {
@@ -24,6 +41,25 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatRouteDeps): vo
     }
 
     // 响应来源由服务端确定，浏览器提交的字段无法改变部署模式或开启新的调用路径。
+    const token = readCookie(request.headers.cookie, DEMO_SESSION_COOKIE);
+    const tokenHash = token ? hashSessionToken(token) : undefined;
+    const currentTime = now();
+
+    // 查单先于 FAQ 和模型分发；命中后不再发起任何外部生成请求。
+    const orderResult = handleOrderQuestion(parsed.data.question, {
+      repository: deps.repository,
+      tokenHash,
+      now: currentTime
+    });
+    if (orderResult) {
+      return orderResult;
+    }
+
+    // 明确的新话题结束待补状态，避免下一轮单独的单号被误消费。
+    if (tokenHash) {
+      deps.repository.setPending(tokenHash, false, currentTime);
+    }
+
     try {
       return await answerChatQuestion(parsed.data.question, deps);
     } catch (error) {

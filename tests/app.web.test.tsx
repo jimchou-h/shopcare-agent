@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/web/App';
 import type { ChatResponse } from '../src/shared/chat';
+import type { DemoSessionResponse } from '../src/shared/orders';
 
 const answered: ChatResponse = {
   status: 'answered',
@@ -322,5 +323,119 @@ describe('顾客问答页面', () => {
       '/api/chat',
       expect.objectContaining({ body: JSON.stringify({ question: originalQuestion }) })
     );
+  });
+});
+
+const demoOrder = {
+  orderId: 'SC-AB12CD34EF56',
+  productName: '轻量通勤双肩包',
+  status: '已签收'
+};
+
+const claimed: DemoSessionResponse = { status: 'claimed', order: demoOrder };
+
+const orderFound: ChatResponse = {
+  status: 'order_query',
+  outcome: 'found',
+  order: demoOrder
+};
+
+function mockOrderFetch(chatResponse: ChatResponse) {
+  return vi.fn(async (url: string) => {
+    if (url === '/api/demo/session') {
+      return { ok: true, json: async () => claimed };
+    }
+    return { ok: true, json: async () => chatResponse };
+  });
+}
+
+describe('顾客在问答页查单', () => {
+  it('领取示例订单后用快捷操作查询，页面展示单号、商品和状态', async () => {
+    const fetchMock = mockOrderFetch(orderFound);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: '领取示例订单' }));
+
+    expect(await screen.findByText(`已领取 ${demoOrder.orderId} · ${demoOrder.productName}`)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '查询示例订单' }));
+    expect(screen.getByLabelText('你的问题')).toHaveValue(`查订单 ${demoOrder.orderId}`);
+
+    await user.click(screen.getByRole('button', { name: '查询' }));
+
+    expect(await screen.findByTestId('order-id')).toHaveTextContent(demoOrder.orderId);
+    expect(screen.getByTestId('order-product')).toHaveTextContent(demoOrder.productName);
+    expect(screen.getByTestId('order-status')).toHaveTextContent('已签收');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/chat',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ question: `查订单 ${demoOrder.orderId}` })
+      })
+    );
+  });
+
+  it('没有会话时展示领取引导并可直接领取', async () => {
+    const fetchMock = mockOrderFetch({
+      status: 'order_query',
+      outcome: 'session_required',
+      message: '请先领取示例订单，再查询订单状态。'
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText('你的问题'), '查订单 SC-AB12CD34EF56');
+    await user.click(screen.getByRole('button', { name: '查询' }));
+
+    expect(await screen.findByTestId('order-message')).toHaveTextContent(
+      '请先领取示例订单，再查询订单状态。'
+    );
+
+    await user.click(screen.getByRole('button', { name: '去领取示例订单' }));
+    expect(await screen.findByText(`已领取 ${demoOrder.orderId} · ${demoOrder.productName}`)).toBeInTheDocument();
+  });
+
+  it('查无结果时展示提示且不出现订单卡片', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockOrderFetch({
+        status: 'order_query',
+        outcome: 'not_found',
+        message: '未找到可查询的订单。'
+      })
+    );
+
+    render(<App />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText('你的问题'), '查订单 SC-ZZZZZZZZZZZZ');
+    await user.click(screen.getByRole('button', { name: '查询' }));
+
+    expect(await screen.findByTestId('order-message')).toHaveTextContent('未找到可查询的订单。');
+    expect(screen.queryByTestId('order-card')).not.toBeInTheDocument();
+  });
+
+  it('领取失败时展示可重试的提示', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => ({ status: 'unavailable', message: '领取服务暂时不可用，请稍后重试。' })
+      })
+    );
+
+    render(<App />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: '领取示例订单' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('领取服务暂时不可用，请稍后重试。');
+    expect(screen.getByRole('button', { name: '领取示例订单' })).toBeEnabled();
   });
 });

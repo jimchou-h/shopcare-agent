@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { demoOrderSchema } from './orders.js';
 
 /** 问答接口的请求体。空白问题在入口处拒绝，避免绕过页面直接提交。 */
 export const chatRequestSchema = z.object({
@@ -10,9 +11,9 @@ export const chatRequestSchema = z.object({
 
 export type ChatRequest = z.infer<typeof chatRequestSchema>;
 
-/** 请求无法处理或生成服务不可用时返回的稳定错误码，与业务结果区分。 */
+/** 请求无法处理、生成服务不可用或来源不受信任时返回的稳定错误码，与业务结果区分。 */
 export const chatErrorResponseSchema = z.object({
-  status: z.enum(['invalid_request', 'upstream_error']),
+  status: z.enum(['invalid_request', 'upstream_error', 'forbidden']),
   message: z.string()
 });
 
@@ -52,12 +53,52 @@ const insufficientEvidenceResponseSchema = z.object({
 });
 
 /**
- * 问答接口的响应契约，页面也用它在渲染前校验外部输入。
- * 只有结构完整时才进入已回答分支，避免异常响应在渲染出处时崩溃。
+ * 查单由服务端确定性处理，结果与模型生成的政策回答分开表示。
+ * `found` 携带订单摘要；其余结果只带引导文案，不携带任何订单详情。
  */
-export const chatResponseSchema = z.discriminatedUnion('status', [
+export const orderQueryOutcomeSchema = z.enum([
+  'found',
+  'not_found',
+  'number_required',
+  'invalid_number',
+  'session_required',
+  'ask_separately',
+  'query_hint'
+]);
+
+export type OrderQueryOutcome = z.infer<typeof orderQueryOutcomeSchema>;
+
+export const orderQueryResponseSchema = z.discriminatedUnion('outcome', [
+  z.object({
+    status: z.literal('order_query'),
+    outcome: z.literal('found'),
+    order: demoOrderSchema
+  }),
+  z.object({
+    status: z.literal('order_query'),
+    outcome: z.enum([
+      'not_found',
+      'number_required',
+      'invalid_number',
+      'session_required',
+      'ask_separately',
+      'query_hint'
+    ]),
+    message: z.string()
+  })
+]);
+
+export type OrderQueryResponse = z.infer<typeof orderQueryResponseSchema>;
+
+/**
+ * 问答接口的响应契约，页面也用它在渲染前校验外部输入。
+ * 只有结构完整时才进入对应渲染分支，避免异常响应在渲染出处或订单时崩溃。
+ * 查单结果本身按 `outcome` 判别，这里用普通联合承载它与政策回答。
+ */
+export const chatResponseSchema = z.union([
   answeredChatResponseSchema,
-  insufficientEvidenceResponseSchema
+  insufficientEvidenceResponseSchema,
+  orderQueryResponseSchema
 ]);
 
 export type ChatResponse = z.infer<typeof chatResponseSchema>;

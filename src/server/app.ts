@@ -1,6 +1,11 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerChatRoute } from './chat/route.js';
-import { ConfigError, type ServerConfig } from './config.js';
+import { DEFAULT_DATABASE_PATH, ConfigError, type ServerConfig } from './config.js';
+import {
+  createSqliteDemoRepository,
+  type DemoRepository
+} from './demo-session/repository.js';
+import { registerDemoSessionRoute } from './demo-session/route.js';
 import { createDeepSeekClient, type DeepSeekGenerator } from './deepseek/client.js';
 import { FAQ_CORPUS, FAQ_CORPUS_VERSION } from './faq/corpus.js';
 import { findCorpusProblems } from './faq/validate.js';
@@ -24,6 +29,10 @@ export interface BuildAppOptions {
   config?: ServerConfig;
   /** 受控替身；未提供且处于真实模式时使用官方客户端。 */
   generate?: DeepSeekGenerator;
+  /** 测试可注入持久化替身；未提供时按配置打开 SQLite。 */
+  repository?: DemoRepository;
+  /** 可控时钟，用于验证会话过期和容器重建后的恢复。 */
+  now?: () => number;
 }
 
 /**
@@ -32,7 +41,7 @@ export interface BuildAppOptions {
  */
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const config = options.config ?? { chatMode: 'preset' };
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, bodyLimit: 16 * 1024 });
 
   let generate = options.generate;
   if (config.chatMode === 'deepseek' && !generate) {
@@ -40,6 +49,18 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       throw new ConfigError('真实模式缺少必填环境变量 DEEPSEEK_API_KEY。');
     }
     generate = createDeepSeekClient({ apiKey: config.deepseekApiKey });
+  }
+
+  // 测试可注入替身；生产默认打开配置指向的 SQLite 文件（容器内为持久卷）。
+  const databasePath =
+    config.databasePath ?? process.env.DATABASE_PATH ?? DEFAULT_DATABASE_PATH;
+  const repository =
+    options.repository ??
+    createSqliteDemoRepository({ databasePath });
+  if (!options.repository) {
+    app.addHook('onClose', async () => {
+      repository.close();
+    });
   }
 
   app.addHook('onSend', async (_request, reply, payload) => {
@@ -62,6 +83,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     };
   });
 
-  registerChatRoute(app, { mode: config.chatMode, generate });
+  registerDemoSessionRoute(app, { repository, now: options.now });
+  registerChatRoute(app, { mode: config.chatMode, generate, repository, now: options.now });
   return app;
 }

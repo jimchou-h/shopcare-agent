@@ -1,8 +1,21 @@
 import Fastify, { type FastifyInstance } from 'fastify';
-import { chatRequestSchema, type ChatErrorResponse } from '../shared/chat.js';
-import { answerQuestion } from './faq/answer.js';
+import { registerChatRoute } from './chat/route.js';
 import { FAQ_CORPUS, FAQ_CORPUS_VERSION } from './faq/corpus.js';
 import { findCorpusProblems } from './faq/validate.js';
+
+/** 生产页面与问答接口同源，浏览器无需连接模型服务。 */
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'"
+].join('; ');
 
 /**
  * 创建 Fastify 应用。测试直接调用 `inject` 验证 HTTP 行为，
@@ -10,6 +23,11 @@ import { findCorpusProblems } from './faq/validate.js';
  */
 export function buildApp(): FastifyInstance {
   const app = Fastify({ logger: false });
+
+  app.addHook('onSend', async (_request, reply, payload) => {
+    reply.header('content-security-policy', CONTENT_SECURITY_POLICY);
+    return payload;
+  });
 
   // 就绪意味着服务能读取到可支撑带出处回答的语料；这里不暴露具体缺项。
   app.get('/healthz', async (_request, reply) => {
@@ -26,18 +44,6 @@ export function buildApp(): FastifyInstance {
     };
   });
 
-  app.post('/api/chat', async (request, reply) => {
-    const parsed = chatRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      const error: ChatErrorResponse = {
-        status: 'invalid_request',
-        message: parsed.error.issues[0]?.message ?? '请求格式不正确，请提供 question 字段。'
-      };
-      return reply.code(400).send(error);
-    }
-
-    return answerQuestion(parsed.data.question);
-  });
-
+  registerChatRoute(app);
   return app;
 }

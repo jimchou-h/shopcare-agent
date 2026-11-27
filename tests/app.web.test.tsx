@@ -22,6 +22,39 @@ afterEach(() => {
 });
 
 describe('顾客问答页面', () => {
+  it('升级后清理旧 Key，访客直接用同源预置问答', async () => {
+    const legacyKey = 'shopcare:deepseek-key';
+    const otherKey = 'shopcare:unrelated-preference';
+    localStorage.setItem(legacyKey, 'legacy-test-key');
+    localStorage.setItem(otherKey, 'keep');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ...answered, mode: 'preset' })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      render(<App />);
+      expect(localStorage.getItem(legacyKey)).toBeNull();
+      expect(localStorage.getItem(otherKey)).toBe('keep');
+      expect(screen.queryByLabelText('DeepSeek API Key')).not.toBeInTheDocument();
+
+      const user = userEvent.setup();
+      await user.type(screen.getByLabelText('你的问题'), '换货期限是多久？');
+      await user.click(screen.getByRole('button', { name: '查询' }));
+
+      expect(await screen.findByTestId('answer-mode')).toHaveTextContent('预置演示');
+      expect(screen.getByTestId('source-title')).toHaveTextContent('换货申请期限');
+      expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+        '/api/chat',
+        expect.objectContaining({ method: 'POST', body: '{"question":"换货期限是多久？"}' })
+      );
+    } finally {
+      localStorage.removeItem(legacyKey);
+      localStorage.removeItem(otherKey);
+    }
+  });
+
   it.each(['换货期限是多久？', '我收到货以后几天内还能申请换货？'])(
     '展示「%s」的结论与出处',
     async (question) => {
@@ -221,10 +254,15 @@ describe('顾客问答页面', () => {
 
     rejectFirst(new TypeError('network down'));
 
-    expect(await screen.findByTestId('request-failed')).toHaveTextContent('请稍后重试');
+    expect(await screen.findByTestId('request-failed')).toHaveTextContent('未完成的问题');
+    // 失败卡片展示实际提交的问题，输入框保留顾客后来编辑的草稿。
+    expect(screen.getByTestId('failed-question')).toHaveTextContent(originalQuestion);
+    expect(input).toHaveValue('退货期限是多久？');
+
     await user.click(screen.getByRole('button', { name: '重试' }));
 
     expect(await screen.findByTestId('answer-text')).toHaveTextContent(answered.answer);
+    expect(input).toHaveValue('退货期限是多久？');
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,

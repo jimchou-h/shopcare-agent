@@ -16,6 +16,16 @@ describe('GET /healthz', () => {
       }
     });
   });
+
+  it('限制页面网络连接为同源', async () => {
+    const response = await buildApp().inject({ method: 'GET', url: '/healthz' });
+    const csp = response.headers['content-security-policy'];
+
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("script-src 'self'");
+    expect(csp?.split('; ')).toContain("connect-src 'self'");
+    expect(csp).not.toContain('*');
+  });
 });
 
 describe('findCorpusProblems', () => {

@@ -1,6 +1,6 @@
 # ShopCare Agent
 
-可部署的电商售后演示：顾客在网页提交中文售后问题，得到带政策出处的回答；证据不足时引导补充信息。当前版本使用合成 FAQ 语料和确定性关键词检索，无需模型 Key。
+可部署的电商售后演示。顾客在网页提交中文售后问题，得到带政策出处的回答，证据不足时可补充信息。预置演示使用合成 FAQ 语料和确定性关键词检索，无需模型 Key。
 
 ## 容器启动（推荐验收方式）
 
@@ -33,6 +33,8 @@ docker compose down
 
 整个流程不需要任何模型 Key 或外部数据。
 
+曾使用浏览器直连版本的访客在打开新版页面时，会自动清除同源存储中的旧 DeepSeek Key。
+
 ## 本地开发
 
 ```bash
@@ -50,7 +52,7 @@ pnpm build
 pnpm start
 ```
 
-`pnpm build` 由 Vite 生成 `dist/web`，TypeScript 编译 `dist/server`；Fastify 同源提供页面、`POST /api/chat` 与 `GET /healthz`。
+`pnpm build` 由 Vite 生成 `dist/web`，TypeScript 编译 `dist/server`。Fastify 同源提供页面、`POST /api/chat` 与 `GET /healthz`。
 
 ## 检查
 

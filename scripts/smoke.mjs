@@ -45,6 +45,7 @@ for (const question of questions) {
   await check(`带出处回答「${question}」`, async () => {
     const body = await postQuestion(question);
     assert.equal(body.status, 'answered', `期望 answered，实际 ${body.status}`);
+    assert.equal(body.mode, 'preset', `期望预置来源，实际 ${body.mode}`);
     assert.ok(body.answer, '缺少结论');
     assert.ok(body.source?.title, '缺少来源标题');
     assert.ok(body.source?.excerpt, '缺少政策摘录');

@@ -29,20 +29,30 @@ export const faqSourceSchema = z.object({
 
 export type FaqSource = z.infer<typeof faqSourceSchema>;
 
+// 可选字段兼容已经归档的问答契约。当前服务返回显式的预置来源。
+const chatModeSchema = z.literal('preset').optional();
+
+const answeredChatResponseSchema = z.object({
+  status: z.literal('answered'),
+  answer: z.string(),
+  source: faqSourceSchema,
+  mode: chatModeSchema
+});
+
+/** 证据不足时只返回引导文案，不携带任何政策结论或引用。 */
+const insufficientEvidenceResponseSchema = z.object({
+  status: z.literal('insufficient_evidence'),
+  message: z.string(),
+  mode: chatModeSchema
+});
+
 /**
  * 问答接口的响应契约，页面也用它在渲染前校验外部输入。
  * 只有结构完整时才进入已回答分支，避免异常响应在渲染出处时崩溃。
  */
 export const chatResponseSchema = z.discriminatedUnion('status', [
-  z.object({
-    status: z.literal('answered'),
-    answer: z.string(),
-    source: faqSourceSchema
-  }),
-  z.object({
-    status: z.literal('insufficient_evidence'),
-    message: z.string()
-  })
+  answeredChatResponseSchema,
+  insufficientEvidenceResponseSchema
 ]);
 
 export type ChatResponse = z.infer<typeof chatResponseSchema>;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/server/app';
 import { FAQ_CORPUS } from '../src/server/faq/corpus';
 import type { ChatErrorResponse, ChatResponse } from '../src/shared/chat';
@@ -29,6 +29,32 @@ async function askAnswered(question: string) {
 }
 
 describe('POST /api/chat 换货期限问答', () => {
+  it('默认实例只开放预置问答路径，浏览器参数无法开启模型', async () => {
+    const app = buildApp();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const question = '换货期限是多久？';
+    try {
+      const result = await app.inject({
+        method: 'POST',
+        url: '/api/chat',
+        payload: { question, mode: 'deepseek' }
+      });
+      expect(result.statusCode).toBe(200);
+      expect(result.json()).toMatchObject({
+        status: 'answered',
+        mode: 'preset',
+        source: { id: 'faq-exchange-window' }
+      });
+
+      const retired = await app.inject({ method: 'POST', url: '/api/chat/context', payload: { question } });
+      expect(retired.statusCode).toBe(404);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      await app.close();
+    }
+  });
+
   it('两种等价问法返回同一政策支持的结论、标题和摘录', async () => {
     const [firstQuestion, secondQuestion] = exchangeWindowFaq.questions;
     if (!firstQuestion || !secondQuestion) {

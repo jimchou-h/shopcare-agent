@@ -146,7 +146,7 @@ async function reachSummary(harness: Harness, cookie: string, orderId: string) {
     step: 'declaration',
     reason: 'quality'
   });
-  const summary = await harness.ask('都齐全', { cookie });
+  const summary = await harness.ask('齐全', { cookie });
   expect(summary.json()).toMatchObject({ outcome: 'summary' });
   return summary.json() as { confirmationId: string; summary: Record<string, unknown> };
 }
@@ -176,7 +176,7 @@ describe('POST /api/chat 在对话内办理换货', () => {
       });
       expect(reason.json().message).toContain('质量问题');
 
-      const summary = await harness.ask('都齐全', { cookie });
+      const summary = await harness.ask('齐全', { cookie });
       const body = summary.json();
       expect(body).toMatchObject({
         status: 'exchange_flow',
@@ -213,7 +213,7 @@ describe('POST /api/chat 在对话内办理换货', () => {
         source: { id: 'faq-exchange-window' }
       });
 
-      const summary = await harness.ask('都齐全', { cookie });
+      const summary = await harness.ask('齐全', { cookie });
       expect(summary.json()).toMatchObject({
         status: 'exchange_flow',
         outcome: 'summary',
@@ -282,7 +282,7 @@ describe('POST /api/chat 在对话内办理换货', () => {
       const query = await harness.ask(`查订单 ${orderId}`, { cookie });
       expect(query.json()).toMatchObject({ status: 'order_query', outcome: 'found' });
 
-      const summary = await harness.ask('都齐全', { cookie });
+      const summary = await harness.ask('齐全', { cookie });
       expect(summary.json()).toMatchObject({
         outcome: 'summary',
         summary: { orderId, reason: 'quality' }
@@ -294,21 +294,21 @@ describe('POST /api/chat 在对话内办理换货', () => {
     {
       name: '未签收',
       signedAt: null,
-      answer: '都齐全',
+      answer: '齐全',
       reason: 'not_signed',
       sources: ['faq-exchange-window']
     },
     {
       name: '超过 7 天',
       signedAt: Date.UTC(2026, 10, 5, 2, 0, 0),
-      answer: '都齐全',
+      answer: '齐全',
       reason: 'overdue',
       sources: ['faq-exchange-window']
     },
     {
       name: '商品条件不满足',
       signedAt: NOW,
-      answer: '有缺失',
+      answer: '不齐全',
       reason: 'condition_not_met',
       sources: ['faq-exchange-condition']
     }
@@ -333,13 +333,37 @@ describe('POST /api/chat 在对话内办理换货', () => {
     });
   });
 
+  it.each(['不齐全', '不完整', '缺件'])(
+    '明确选择「%s」按商品条件不满足处理',
+    async (answer) => {
+      await withHarness(async (harness) => {
+        const { cookie, orderId } = await harness.claim();
+        await harness.ask('我想换货', { cookie });
+        await harness.ask('质量问题', { cookie });
+
+        const response = await harness.ask(answer, { cookie });
+        expect(response.json()).toMatchObject({
+          status: 'exchange_flow',
+          outcome: 'ineligible',
+          reason: 'condition_not_met'
+        });
+        expect(response.json()).not.toHaveProperty('confirmationId');
+        expect(harness.readAll('SELECT * FROM exchange_flows')).toEqual([]);
+        expect(harness.readAll('SELECT * FROM exchange_applications')).toEqual([]);
+        expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
+        expect(orderId).toBeTruthy();
+      });
+    }
+  );
+
   it.each([
-    '配件不齐全',
     '商品不完好',
+    '配件不齐全',
     '包装不完整',
     '配件没到齐',
-    '原包装已拆封'
-  ])('否定申报「%s」不会被当作满足条件', async (answer) => {
+    '原包装已拆封',
+    '看起来没问题吧'
+  ])('自由文本「%s」无法判断时继续询问选择', async (answer) => {
     await withHarness(async (harness) => {
       const { cookie, orderId } = await harness.claim();
       await harness.ask('我想换货', { cookie });
@@ -348,34 +372,42 @@ describe('POST /api/chat 在对话内办理换货', () => {
       const response = await harness.ask(answer, { cookie });
       expect(response.json()).toMatchObject({
         status: 'exchange_flow',
+        outcome: 'step',
+        step: 'declaration',
+        orderId,
+        reason: 'quality',
+        options: ['齐全', '不齐全']
+      });
+      expect(response.json()).not.toHaveProperty('confirmationId');
+      expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
+      expect(harness.readAll<{ step: string; reason: string }>(
+        'SELECT step, reason FROM exchange_flows'
+      )).toEqual([{ step: 'declaration', reason: 'quality' }]);
+
+      // 只有明确选择后才继续资格判断与摘要生成。
+      const rejected = await harness.ask('不齐全', { cookie });
+      expect(rejected.json()).toMatchObject({
         outcome: 'ineligible',
         reason: 'condition_not_met'
       });
-      expect(response.json()).not.toHaveProperty('confirmationId');
-      expect(harness.readAll('SELECT * FROM exchange_flows')).toEqual([]);
       expect(harness.readAll('SELECT * FROM exchange_applications')).toEqual([]);
-      expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
-      expect(orderId).toBeTruthy();
     });
   });
 
-  it.each(['没问题，都齐全', '商品完好，配件齐全', '未拆封，都齐全'])(
-    '肯定申报「%s」仍可生成摘要',
-    async (answer) => {
-      await withHarness(async (harness) => {
-        const { cookie, orderId } = await harness.claim();
-        await harness.ask('我想换货', { cookie });
-        await harness.ask('质量问题', { cookie });
+  it.each(['齐全', '完整'])('明确选择「%s」可生成摘要', async (answer) => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      await harness.ask('我想换货', { cookie });
+      await harness.ask('质量问题', { cookie });
 
-        const summary = await harness.ask(answer, { cookie });
-        expect(summary.json()).toMatchObject({
-          status: 'exchange_flow',
-          outcome: 'summary',
-          summary: { orderId, reason: 'quality' }
-        });
+      const summary = await harness.ask(answer, { cookie });
+      expect(summary.json()).toMatchObject({
+        status: 'exchange_flow',
+        outcome: 'summary',
+        summary: { orderId, reason: 'quality' }
       });
-    }
-  );
+    });
+  });
 
   it.each([
     '如何取消换货？',
@@ -396,7 +428,7 @@ describe('POST /api/chat 在对话内办理换货', () => {
       )).toEqual([{ step: 'declaration', reason: 'quality' }]);
 
       // 办理进度与已选原因保持不变，下一轮仍可生成摘要。
-      const summary = await harness.ask('都齐全', { cookie });
+      const summary = await harness.ask('齐全', { cookie });
       expect(summary.json()).toMatchObject({
         status: 'exchange_flow',
         outcome: 'summary',
@@ -430,7 +462,7 @@ describe('POST /api/chat 在对话内办理换货', () => {
       expect(stale.json()).toMatchObject({ outcome: 'superseded' });
       expect(harness.readAll('SELECT * FROM exchange_applications')).toEqual([]);
 
-      const second = (await harness.ask('都齐全', { cookie })).json() as {
+      const second = (await harness.ask('齐全', { cookie })).json() as {
         confirmationId: string;
         summary: { reason: string; shipping: { borneBy: string } };
       };

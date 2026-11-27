@@ -19,8 +19,8 @@ export const EXCHANGE_MESSAGES = {
 export const EXCHANGE_FLOW_MESSAGES = {
   reasonStep: '请选择换货原因：回复「质量问题」或「其他原因」。',
   reasonUnknown: '未识别到换货原因，请回复「质量问题」或「其他原因」。',
-  declarationStep: '请确认商品现状：回复「都齐全」，或说明商品、配件或包装的缺失情况。',
-  declarationUnknown: '请回复「都齐全」，或说明商品、配件或包装的缺失情况。',
+  declarationStep: '请选择商品现状：齐全或不齐全。',
+  declarationUnknown: '无法判断商品现状，请选择「齐全」或「不齐全」。',
   confirmHint: '请点击摘要中的「确认提交」按钮完成申请。若需结束本次办理，请回复「取消换货」。',
   cancelled: '已取消本次换货办理，未提交的确认摘要已作废。',
   noActiveFlow: '当前没有待继续或可取消的换货办理。',

@@ -53,8 +53,8 @@ const declarationStep: ChatResponse = {
   step: 'declaration',
   orderId: demoOrder.orderId,
   reason: 'quality',
-  message: '已记录换货原因：质量问题。请确认商品现状：回复「都齐全」，或说明缺失情况。',
-  options: ['都齐全', '有缺失']
+  message: '已记录换货原因：质量问题。请选择商品现状：齐全或不齐全。',
+  options: ['齐全', '不齐全']
 };
 
 const summaryResponse: ChatResponse = {
@@ -151,7 +151,7 @@ describe('顾客在对话里办理换货', () => {
       const steps = screen.getAllByTestId('exchange-step-message');
       expect(steps.at(-1)).toHaveTextContent('已记录换货原因：质量问题');
     });
-    await user.click(screen.getByRole('button', { name: '都齐全' }));
+    await user.click(screen.getByRole('button', { name: '齐全' }));
 
     expect(await screen.findByTestId('exchange-summary')).toBeInTheDocument();
     expect(screen.getByTestId('exchange-reason-label')).toHaveTextContent('质量问题');
@@ -161,7 +161,7 @@ describe('顾客在对话里办理换货', () => {
     expect(screen.getByText('换货的运费由谁承担')).toBeInTheDocument();
 
     expect(userMessageTexts()).toEqual(
-      expect.arrayContaining(['我想换货', '质量问题', '都齐全'])
+      expect.arrayContaining(['我想换货', '质量问题', '齐全'])
     );
 
     await user.click(screen.getByRole('button', { name: '确认提交' }));
@@ -187,8 +187,8 @@ describe('顾客在对话里办理换货', () => {
     await user.click(screen.getByRole('button', { name: '查询' }));
     await screen.findByRole('button', { name: '质量问题' });
     await user.click(screen.getByRole('button', { name: '质量问题' }));
-    await screen.findByRole('button', { name: '都齐全' });
-    await user.click(screen.getByRole('button', { name: '都齐全' }));
+    await screen.findByRole('button', { name: '齐全' });
+    await user.click(screen.getByRole('button', { name: '齐全' }));
     await screen.findByTestId('exchange-summary');
 
     await user.clear(input);
@@ -215,7 +215,7 @@ describe('顾客在对话里办理换货', () => {
     await user.click(screen.getByRole('button', { name: '查询' }));
     await screen.findByRole('button', { name: '质量问题' });
     await user.click(screen.getByRole('button', { name: '质量问题' }));
-    await screen.findByRole('button', { name: '都齐全' });
+    await screen.findByRole('button', { name: '齐全' });
 
     await user.clear(input);
     await user.type(input, '换货期限是多久？');
@@ -226,7 +226,7 @@ describe('顾客在对话里办理换货', () => {
     // 步骤消息仍在，下一轮选项继续可点。
     expect(screen.getByText(/已记录换货原因：质量问题/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '都齐全' }));
+    await user.click(screen.getByRole('button', { name: '齐全' }));
 
     expect(await screen.findByTestId('exchange-summary')).toBeInTheDocument();
     expect(screen.getByTestId('exchange-reason-label')).toHaveTextContent('质量问题');
@@ -262,8 +262,8 @@ describe('顾客在对话里办理换货', () => {
     await user.click(screen.getByRole('button', { name: '查询' }));
     await screen.findByRole('button', { name: '质量问题' });
     await user.click(screen.getByRole('button', { name: '质量问题' }));
-    await screen.findByRole('button', { name: '都齐全' });
-    await user.click(screen.getByRole('button', { name: '都齐全' }));
+    await screen.findByRole('button', { name: '齐全' });
+    await user.click(screen.getByRole('button', { name: '齐全' }));
     await screen.findByTestId('exchange-summary');
 
     const confirm = screen.getByRole('button', { name: '确认提交' });
@@ -278,5 +278,62 @@ describe('顾客在对话里办理换货', () => {
     expect(screen.getByTestId('exchange-application-id')).toHaveTextContent(
       'EX-AB12CD34EF56'
     );
+  });
+
+  it('自由文本无法判断商品现状时继续询问明确选择', async () => {
+    const ineligible: ChatResponse = {
+      status: 'exchange_flow',
+      outcome: 'ineligible',
+      reason: 'condition_not_met',
+      message: '商品需保持完好，配件、赠品及原包装齐全且不影响二次销售才能申请换货。',
+      sources: [sources[1]!]
+    };
+    const queue = [reasonStep, declarationStep, declarationStep, ineligible];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === '/api/demo/session') {
+          return jsonResponse(claimed);
+        }
+        if (url === '/api/chat') {
+          return jsonResponse(queue.shift());
+        }
+        throw new Error(`未预期的请求：${url}`);
+      })
+    );
+
+    render(<App />);
+    const user = userEvent.setup();
+    const input = screen.getByLabelText('你的问题');
+
+    await user.type(input, '我想换货');
+    await user.click(screen.getByRole('button', { name: '查询' }));
+    await screen.findByRole('button', { name: '质量问题' });
+    await user.click(screen.getByRole('button', { name: '质量问题' }));
+    await screen.findByRole('button', { name: '齐全' });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '查询' })).toBeEnabled()
+    );
+
+    // 模糊自由文本不会生成摘要，助手继续展示二选一。
+    const inputAfterStep = screen.getByLabelText('你的问题');
+    await user.clear(inputAfterStep);
+    await user.type(inputAfterStep, '商品不完好');
+    expect(inputAfterStep).toHaveValue('商品不完好');
+    await user.click(screen.getByRole('button', { name: '查询' }));
+    expect(await screen.findByText('商品不完好')).toBeInTheDocument();
+    // 模糊自由文本不会生成摘要，助手继续展示二选一。
+    expect(screen.getAllByTestId('exchange-step-message').at(-1)).toHaveTextContent(
+      '齐全或不齐全'
+    );
+    expect(screen.getAllByRole('button', { name: '齐全' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: '不齐全' }).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('exchange-summary')).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole('button', { name: '不齐全' }).at(-1)!);
+    expect(await screen.findByTestId('exchange-ineligible')).toHaveTextContent(
+      '暂不能申请换货'
+    );
+    expect(screen.queryByTestId('exchange-summary')).not.toBeInTheDocument();
   });
 });

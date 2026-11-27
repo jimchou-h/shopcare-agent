@@ -26,7 +26,7 @@ export interface ExchangeFlowDeps {
 }
 
 const REASON_OPTIONS = ['质量问题', '其他原因'];
-const DECLARATION_OPTIONS = ['都齐全', '有缺失'];
+const DECLARATION_OPTIONS = ['齐全', '不齐全'];
 const START_PHRASES = ['我想换货', '我要换货', '申请换货', '办理换货', '开始换货', '换货申请'];
 const CONFIRM_TEXTS = new Set(['确认', '确定', '确认提交', '提交']);
 
@@ -81,43 +81,34 @@ function parseReason(question: string): ExchangeReason | null {
 }
 
 /**
- * 「否定坏情况」的肯定说法，例如「没问题」「没有破损」「未拆封」。
+ * 商品状态是明确的二选一，不从不完整描述里推断「是否齐全」。
  *
- * 先剔除这些片段，再检查剩余文本里的否定词，避免把「完好」等正向词
- * 或「没问题」等常见肯定答复误判。
+ * 保留少量等价选项（完整 / 有缺失）兼容顾客直接输入，以及部署前已存在的
+ * 办理提示；其余自由文本一律返回 null，由页面继续询问选择。
  */
-const AFFIRMED_ABSENCE =
-  /没问题|没(有)?(破损|损坏|缺少|缺失|少|坏)|无(损|破损|损坏|问题|缺失|刮痕|划痕)|未(拆封|拆|使用|开封)|不(缺少|缺|少)/g;
-const AFFIRMED_ABSENCE_TEST =
-  /没问题|没(有)?(破损|损坏|缺少|缺失|少|坏)|无(损|破损|损坏|问题|缺失|刮痕|划痕)|未(拆封|拆|使用|开封)|不(缺少|缺|少)/;
-const NEGATIVE_DECLARATION = /不|没|未|无|缺|少|拆|破损|损坏|丢失|坏|影响二次销售/;
-const POSITIVE_DECLARATION = /完好|齐全|完整|都齐|符合|满足|是的|确认|可以|正常/;
+const DECLARATION_ANSWERS = new Map<string, boolean>([
+  ['齐全', true],
+  ['都齐全', true],
+  ['完整', true],
+  ['都完整', true],
+  ['不齐全', false],
+  ['有缺失', false],
+  ['缺件', false],
+  ['不完整', false]
+]);
 
-/**
- * 对话只做一轮商品申报：全部齐全视为满足条件，出现缺件或拆封按不满足处理。
- *
- * 演示无法核实实物，申报只用于确定后续资格判断与政策出处。
- */
 function parseDeclaration(question: string): ExchangeDeclaration | null {
-  // 否定修饰优先：「商品不完好」「配件不齐全」不能被正向词「完好/齐全」误判。
-  const remaining = question.replace(AFFIRMED_ABSENCE, '');
-  if (NEGATIVE_DECLARATION.test(remaining)) {
-    return {
-      itemIntact: false,
-      accessoriesComplete: false,
-      originalPackaging: false,
-      giftComplete: false
-    };
+  // 去除空白和标点，只接受明确的选项值，避免关键词猜测商品是否齐全。
+  const answer = DECLARATION_ANSWERS.get(question.replace(/[\s，。！？、,.!?]/g, ''));
+  if (answer === undefined) {
+    return null;
   }
-  if (POSITIVE_DECLARATION.test(remaining) || AFFIRMED_ABSENCE_TEST.test(question)) {
-    return {
-      itemIntact: true,
-      accessoriesComplete: true,
-      originalPackaging: true,
-      giftComplete: true
-    };
-  }
-  return null;
+  return {
+    itemIntact: answer,
+    accessoriesComplete: answer,
+    originalPackaging: answer,
+    giftComplete: answer
+  };
 }
 
 function reasonStep(orderId: string): ExchangeFlowResponse {

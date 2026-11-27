@@ -89,7 +89,7 @@ describe('对话内换货进度持久化', () => {
         });
         expect(resumed.json().message).toContain('质量问题');
 
-        const summary = await ask(rebuilt, '都齐全', cookie);
+        const summary = await ask(rebuilt, '齐全', cookie);
         expect(summary.json()).toMatchObject({
           outcome: 'summary',
           summary: { orderId, reason: 'quality', reasonLabel: '质量问题' }
@@ -141,7 +141,7 @@ describe('对话内换货进度持久化', () => {
           source: { id: 'faq-exchange-window' }
         });
 
-        const summary = await ask(refreshed, '都齐全', cookie);
+        const summary = await ask(refreshed, '齐全', cookie);
         expect(summary.json()).toMatchObject({
           status: 'exchange_flow',
           outcome: 'summary',
@@ -165,7 +165,7 @@ describe('对话内换货进度持久化', () => {
         const { cookie, orderId } = await claim(app);
         await startAndChooseReason(app, cookie);
 
-        const summary = await ask(app, '都齐全', cookie);
+        const summary = await ask(app, '齐全', cookie);
         const confirmationId = summary.json().confirmationId as string;
         expect(summary.json()).toMatchObject({ outcome: 'summary' });
 
@@ -184,7 +184,7 @@ describe('对话内换货进度持久化', () => {
 
         // 重新办理并提交后，查单仍能恢复回执，且「继续换货」直接给出原申请。
         await startAndChooseReason(app, cookie);
-        const second = await ask(app, '都齐全', cookie);
+        const second = await ask(app, '齐全', cookie);
         const submitted = await post(
           app,
           '/api/exchange/confirm',

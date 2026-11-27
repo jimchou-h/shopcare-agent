@@ -24,7 +24,7 @@ export const demoSessionResponseSchema = z.object({
 export type DemoSessionResponse = z.infer<typeof demoSessionResponseSchema>;
 
 export const demoSessionErrorSchema = z.object({
-  status: z.enum(['forbidden', 'unavailable']),
+  status: z.enum(['forbidden', 'unavailable', 'rate_limited']),
   message: z.string()
 });
 

@@ -149,6 +149,43 @@ describe('POST /api/demo/session 领取示例订单', () => {
     });
   });
 
+  it('Origin 协议与请求协议不一致时拒绝', async () => {
+    await withApp(async (app) => {
+      const response = await claim(app, {
+        host: HOST,
+        origin: `https://${HOST}`,
+        'sec-fetch-site': 'same-origin'
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.headers['set-cookie']).toBeUndefined();
+    });
+  });
+
+  it('Origin 主机相符但 Sec-Fetch-Site 标记为跨站时拒绝', async () => {
+    await withApp(async (app) => {
+      const response = await claim(app, {
+        host: HOST,
+        origin: SAME_ORIGIN,
+        'sec-fetch-site': 'cross-site'
+      });
+
+      expect(response.statusCode).toBe(403);
+    });
+  });
+
+  it('Origin 与 Sec-Fetch-Site 都同源时允许', async () => {
+    await withApp(async (app) => {
+      const response = await claim(app, {
+        host: HOST,
+        origin: SAME_ORIGIN,
+        'sec-fetch-site': 'same-origin'
+      });
+
+      expect(response.statusCode).toBe(200);
+    });
+  });
+
   it('存储不可用时返回稳定的领取失败提示', async () => {
     const broken: DemoRepository = {
       claimSession() {

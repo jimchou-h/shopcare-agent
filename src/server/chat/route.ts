@@ -8,6 +8,7 @@ import type { DeepSeekGenerator } from '../deepseek/client.js';
 import type { DemoRepository } from '../demo-session/repository.js';
 import { hashSessionToken } from '../demo-session/token.js';
 import { DEMO_SESSION_COOKIE, readCookie } from '../http/cookies.js';
+import type { RateLimiter } from '../http/rate-limit.js';
 import { isTrustedSameOrigin } from '../http/same-origin.js';
 import { handleOrderQuestion } from '../orders/query.js';
 import { ChatUpstreamError, answerChatQuestion } from './answer-question.js';
@@ -16,6 +17,7 @@ export interface ChatRouteDeps {
   mode: DeploymentMode;
   generate?: DeepSeekGenerator;
   repository: DemoRepository;
+  rateLimiter: RateLimiter;
   now?: () => number;
 }
 
@@ -23,6 +25,14 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatRouteDeps): vo
   const now = deps.now ?? Date.now;
 
   app.post('/api/chat', async (request, reply) => {
+    if (!deps.rateLimiter.consume(request.ip)) {
+      const limited: ChatErrorResponse = {
+        status: 'rate_limited',
+        message: '请求过于频繁，请稍后重试。'
+      };
+      return reply.code(429).send(limited);
+    }
+
     if (!isTrustedSameOrigin(request)) {
       const forbidden: ChatErrorResponse = {
         status: 'forbidden',

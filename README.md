@@ -21,7 +21,7 @@ docker compose up --build -d
 2. 点击「查询示例订单」或输入 `查订单 SC-...`，结果直接显示单号、商品名和「已签收」。
 3. 只输入 `查订单` 时页面提示补充单号，下一轮直接输入该单号即可完成查询。
 
-演示会话通过 `HttpOnly` Cookie 识别，订单与会话保存在 SQLite 中。Docker Compose 使用命名卷 `shopcare-data` 挂载到 `/app/data`；`docker compose down` 会保留数据卷，重建容器后原浏览器仍可继续查询未过期的会话。需要清空演示数据时执行：
+演示会话通过 `HttpOnly` Cookie 识别，订单与会话保存在 SQLite 中。领取和问答接口按来源 IP 限制每分钟 60 次，超限返回 429。Docker Compose 使用命名卷 `shopcare-data` 挂载到 `/app/data`；`docker compose down` 会保留数据卷，重建容器后原浏览器仍可继续查询未过期的会话。需要清空演示数据时执行：
 
 ```bash
 docker compose down -v

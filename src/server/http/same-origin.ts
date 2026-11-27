@@ -33,28 +33,39 @@ function isEquivalentHost(left: string, right: string): boolean {
 /**
  * 判定请求是否来自页面自身同源。
  *
- * 浏览器发起的写操作会带 `Origin` 或 `Sec-Fetch-Site`；两者存在时必须是同源，
- * 防止其他站点借默认携带的演示 Cookie 改变会话状态。没有这些头的服务端调用
- * （例如健康检查或命令行冒烟）保持兼容。
+ * 浏览器发起的写操作会带 `Origin` 或 `Sec-Fetch-Site`。两者同时存在时都必须满足：
+ * 请求站点标记为同源，且 `Origin` 的协议、主机和端口与请求一致，防止其他站点
+ * 借默认携带的演示 Cookie 改变会话状态。没有这些头的服务端调用保持兼容。
  */
 export function isTrustedSameOrigin(request: FastifyRequest): boolean {
-  const origin = request.headers.origin;
-  if (typeof origin === 'string') {
-    const host = request.headers.host;
-    if (typeof host !== 'string') {
-      return false;
-    }
-    try {
-      return isEquivalentHost(new URL(origin).host, host);
-    } catch {
-      return false;
-    }
-  }
-
   const site = request.headers['sec-fetch-site'];
   if (typeof site === 'string' && site !== 'same-origin' && site !== 'none') {
     return false;
   }
 
-  return true;
+  const origin = request.headers.origin;
+  if (typeof origin !== 'string') {
+    return true;
+  }
+
+  const host = request.headers.host;
+  if (typeof host !== 'string') {
+    return false;
+  }
+
+  let originUrl: URL;
+  try {
+    originUrl = new URL(origin);
+  } catch {
+    return false;
+  }
+
+  const forwardedProto = request.headers['x-forwarded-proto'];
+  const forwarded =
+    typeof forwardedProto === 'string'
+      ? forwardedProto.split(',')[0]?.trim().toLowerCase()
+      : undefined;
+  const protocol = forwarded || request.protocol;
+
+  return originUrl.protocol === `${protocol}:` && isEquivalentHost(originUrl.host, host);
 }

@@ -9,6 +9,7 @@ import { registerDemoSessionRoute } from './demo-session/route.js';
 import { createDeepSeekClient, type DeepSeekGenerator } from './deepseek/client.js';
 import { FAQ_CORPUS, FAQ_CORPUS_VERSION } from './faq/corpus.js';
 import { findCorpusProblems } from './faq/validate.js';
+import { DEFAULT_RATE_LIMIT, createRateLimiter } from './http/rate-limit.js';
 
 /** 生产页面与问答接口同源，浏览器无需连接模型服务。 */
 const CONTENT_SECURITY_POLICY = [
@@ -33,6 +34,8 @@ export interface BuildAppOptions {
   repository?: DemoRepository;
   /** 可控时钟，用于验证会话过期和容器重建后的恢复。 */
   now?: () => number;
+  /** 公开接口限流参数；测试可调小窗口和额度，生产使用默认值。 */
+  rateLimit?: { limit?: number; windowMs?: number };
 }
 
 /**
@@ -83,7 +86,26 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     };
   });
 
-  registerDemoSessionRoute(app, { repository, now: options.now });
-  registerChatRoute(app, { mode: config.chatMode, generate, repository, now: options.now });
+  // 领取和问答各自使用独立窗口，避免一个入口的高频请求挤占另一个入口。
+  const rateLimitOptions = {
+    limit: options.rateLimit?.limit ?? DEFAULT_RATE_LIMIT.limit,
+    windowMs: options.rateLimit?.windowMs ?? DEFAULT_RATE_LIMIT.windowMs,
+    now: options.now
+  };
+  const sessionRateLimiter = createRateLimiter(rateLimitOptions);
+  const chatRateLimiter = createRateLimiter(rateLimitOptions);
+
+  registerDemoSessionRoute(app, {
+    repository,
+    rateLimiter: sessionRateLimiter,
+    now: options.now
+  });
+  registerChatRoute(app, {
+    mode: config.chatMode,
+    generate,
+    repository,
+    rateLimiter: chatRateLimiter,
+    now: options.now
+  });
   return app;
 }

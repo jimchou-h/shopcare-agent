@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { DEMO_SESSION_COOKIE, readCookie, serializeSessionCookie } from '../http/cookies.js';
+import type { RateLimiter } from '../http/rate-limit.js';
 import { isTrustedSameOrigin } from '../http/same-origin.js';
 import {
   DEFAULT_SESSION_TTL_MS,
@@ -9,6 +10,7 @@ import { createSessionToken, hashSessionToken } from './token.js';
 
 export interface DemoSessionRouteDeps {
   repository: DemoRepository;
+  rateLimiter: RateLimiter;
   ttlMs?: number;
   now?: () => number;
 }
@@ -40,6 +42,13 @@ export function registerDemoSessionRoute(
   }
 
   app.post('/api/demo/session', async (request, reply) => {
+    if (!deps.rateLimiter.consume(request.ip)) {
+      return reply.code(429).send({
+        status: 'rate_limited',
+        message: '请求过于频繁，请稍后重试。'
+      });
+    }
+
     if (!isTrustedSameOrigin(request)) {
       return reply.code(403).send({
         status: 'forbidden',
@@ -48,12 +57,20 @@ export function registerDemoSessionRoute(
     }
 
     try {
+      const currentTime = now();
       const existingToken = readCookie(request.headers.cookie, DEMO_SESSION_COOKIE);
-      const token = existingToken ?? createSessionToken();
-      const claimed = deps.repository.claimSession(hashSessionToken(token), now());
+      const existingHash = existingToken ? hashSessionToken(existingToken) : null;
+      const existingSession = existingHash
+        ? deps.repository.findSession(existingHash, currentTime)
+        : null;
 
-      // 首次领取或旧令牌已过期时重新下发 Cookie；有效会话重复领取不延长固定有效期。
-      if (!existingToken || claimed.created) {
+      // 只有仍然有效的会话才复用原令牌。过期或未知凭证一律换发新令牌，
+      // 避免旧 Cookie 因重新领取而重新生效并指向新订单。
+      const token =
+        existingSession && existingToken ? existingToken : createSessionToken();
+      const claimed = deps.repository.claimSession(hashSessionToken(token), currentTime);
+
+      if (!existingSession) {
         reply.header(
           'set-cookie',
           serializeSessionCookie(DEMO_SESSION_COOKIE, token, {

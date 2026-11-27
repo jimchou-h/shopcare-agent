@@ -138,7 +138,18 @@ describe('演示状态在数据库重建后恢复', () => {
         const newOrderId = reclaimed.json<DemoSessionResponse>().order.orderId;
         expect(newOrderId).not.toBe(oldOrderId);
 
-        const fresh = await ask(app, `查订单 ${newOrderId}`, readCookie(reclaimed.headers));
+        const newCookie = readCookie(reclaimed.headers);
+        expect(newCookie).not.toBe(cookie);
+
+        // 旧凭证必须持续失效：即使新订单已建立，旧 Cookie 也不能查询它。
+        const staleAttempt = await ask(app, `查订单 ${newOrderId}`, cookie);
+        expect(staleAttempt.json<ChatResponse>()).toEqual({
+          status: 'order_query',
+          outcome: 'session_required',
+          message: '请先领取示例订单，再查询订单状态。'
+        });
+
+        const fresh = await ask(app, `查订单 ${newOrderId}`, newCookie);
         expect(fresh.json<ChatResponse>()).toMatchObject({
           status: 'order_query',
           outcome: 'found',

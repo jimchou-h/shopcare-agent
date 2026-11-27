@@ -13,7 +13,7 @@ export type ChatRequest = z.infer<typeof chatRequestSchema>;
 
 /** 请求无法处理、生成服务不可用或来源不受信任时返回的稳定错误码，与业务结果区分。 */
 export const chatErrorResponseSchema = z.object({
-  status: z.enum(['invalid_request', 'upstream_error', 'forbidden']),
+  status: z.enum(['invalid_request', 'upstream_error', 'forbidden', 'rate_limited']),
   message: z.string()
 });
 

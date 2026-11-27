@@ -467,6 +467,28 @@ describe('顾客在问答页查单', () => {
     );
   });
 
+  it('领取被限流时展示服务端提示并可重试', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          status: 'rate_limited',
+          message: '请求过于频繁，请稍后重试。'
+        })
+      })
+    );
+
+    render(<App />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: '领取示例订单' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('请求过于频繁，请稍后重试。');
+    expect(screen.getByRole('button', { name: '重试领取' })).toBeEnabled();
+  });
+
   it('领取失败时展示服务端提示并可通过重试完成领取', async () => {
     const fetchMock = vi
       .fn()

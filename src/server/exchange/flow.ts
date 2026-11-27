@@ -46,6 +46,11 @@ function isQuestionShaped(question: string): boolean {
 function detectIntent(question: string): Intent {
   const text = question.trim();
 
+  // 疑问句是政策咨询，不能当作办理、恢复或取消指令。
+  if (isQuestionShaped(text)) {
+    return null;
+  }
+
   if (/取消(本次)?换货/.test(text) || text === '取消' || text === '不换了') {
     return 'cancel';
   }
@@ -55,7 +60,7 @@ function detectIntent(question: string): Intent {
   if (CONFIRM_TEXTS.has(text)) {
     return 'confirm';
   }
-  if (!isQuestionShaped(text) && START_PHRASES.some((phrase) => text.includes(phrase))) {
+  if (START_PHRASES.some((phrase) => text.includes(phrase))) {
     return 'start';
   }
   return null;
@@ -78,7 +83,8 @@ function parseReason(question: string): ExchangeReason | null {
  * 演示无法核实实物，申报只用于确定后续资格判断与政策出处。
  */
 function parseDeclaration(question: string): ExchangeDeclaration | null {
-  if (/缺|少|拆|破损|丢失|不全|影响二次销售|没有/.test(question)) {
+  // 否定表述优先，避免「配件不齐全」被正向的「齐全」误判为满足条件。
+  if (/缺|少|拆|破损|丢失|不全|不齐|未齐|没齐|不完整|影响二次销售|没有/.test(question)) {
     return {
       itemIntact: false,
       accessoriesComplete: false,

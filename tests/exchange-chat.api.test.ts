@@ -333,6 +333,93 @@ describe('POST /api/chat 在对话内办理换货', () => {
     });
   });
 
+  it('否定表述的商品申报不会被当作满足条件', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      await harness.ask('我想换货', { cookie });
+      await harness.ask('质量问题', { cookie });
+
+      const response = await harness.ask('配件不齐全', { cookie });
+      expect(response.json()).toMatchObject({
+        status: 'exchange_flow',
+        outcome: 'ineligible',
+        reason: 'condition_not_met'
+      });
+      expect(response.json()).not.toHaveProperty('confirmationId');
+      expect(harness.readAll('SELECT * FROM exchange_flows')).toEqual([]);
+      expect(harness.readAll('SELECT * FROM exchange_applications')).toEqual([]);
+      expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
+      expect(orderId).toBeTruthy();
+    });
+  });
+
+  it('询问如何取消换货不会结束办理', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      await harness.ask('我想换货', { cookie });
+      await harness.ask('质量问题', { cookie });
+
+      const question = await harness.ask('如何取消换货？', { cookie });
+      expect(question.json()).not.toMatchObject({ outcome: 'cancelled' });
+      expect(harness.readAll<{ step: string; reason: string }>(
+        'SELECT step, reason FROM exchange_flows'
+      )).toEqual([{ step: 'declaration', reason: 'quality' }]);
+
+      // 办理进度与已选原因保持不变，下一轮仍可生成摘要。
+      const summary = await harness.ask('都齐全', { cookie });
+      expect(summary.json()).toMatchObject({
+        status: 'exchange_flow',
+        outcome: 'summary',
+        summary: { orderId, reason: 'quality' }
+      });
+    });
+  });
+
+  it('重新发起换货后旧摘要无法提交', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      const first = await reachSummary(harness, cookie, orderId);
+      expect(first.summary).toMatchObject({ reason: 'quality' });
+
+      // 重新发起会作废上一份尚未提交的摘要。
+      expect((await harness.ask('我想换货', { cookie })).json()).toMatchObject({
+        outcome: 'step',
+        step: 'reason'
+      });
+      expect((await harness.ask('其他原因', { cookie })).json()).toMatchObject({
+        outcome: 'step',
+        step: 'declaration',
+        reason: 'other'
+      });
+
+      // 新摘要生成前旧确认也必须失效，不能沿用旧原因和运费条件提交。
+      const stale = await harness.confirm(
+        { confirmationId: first.confirmationId },
+        { cookie }
+      );
+      expect(stale.json()).toMatchObject({ outcome: 'superseded' });
+      expect(harness.readAll('SELECT * FROM exchange_applications')).toEqual([]);
+
+      const second = (await harness.ask('都齐全', { cookie })).json() as {
+        confirmationId: string;
+        summary: { reason: string; shipping: { borneBy: string } };
+      };
+      expect(second.summary).toMatchObject({
+        reason: 'other',
+        shipping: { borneBy: 'customer' }
+      });
+
+      const submitted = await harness.confirm(
+        { confirmationId: second.confirmationId },
+        { cookie }
+      );
+      expect(submitted.json()).toMatchObject({ outcome: 'submitted' });
+      expect(harness.readAll<{ reason: string }>(
+        'SELECT reason FROM exchange_applications'
+      )).toEqual([{ reason: 'other' }]);
+    });
+  });
+
   it('没有有效会话时引导领取，外部来源被拒绝', async () => {
     await withHarness(async (harness) => {
       const anonymous = await harness.ask('我想换货');

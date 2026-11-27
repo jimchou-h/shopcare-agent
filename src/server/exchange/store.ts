@@ -356,22 +356,37 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
     },
 
     startFlow(input) {
-      // 同一访客重新发起时重置已有进度，但始终绑定当前会话的订单。
-      db.prepare(
-        `INSERT INTO exchange_flows (visitor_id, order_id, step, updated_at)
-         VALUES (?, ?, 'reason', ?)
-         ON CONFLICT(visitor_id) DO UPDATE SET
-           order_id = excluded.order_id,
-           step = 'reason',
-           reason = NULL,
-           item_intact = 0,
-           accessories_complete = 0,
-           original_packaging = 0,
-           gift_complete = 0,
-           confirmation_id = NULL,
-           expires_at = NULL,
-           updated_at = excluded.updated_at`
-      ).run(input.visitorId, input.orderId, input.now);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        // 重新发起即作废该访客尚未提交的摘要，避免旧确认沿用旧原因和运费条件提交。
+        db.prepare(
+          `UPDATE exchange_summaries
+              SET superseded_at = ?
+            WHERE visitor_id = ? AND superseded_at IS NULL AND consumed_at IS NULL`
+        ).run(input.now, input.visitorId);
+
+        // 同一访客重新发起时重置已有进度，但始终绑定当前会话的订单。
+        db.prepare(
+          `INSERT INTO exchange_flows (visitor_id, order_id, step, updated_at)
+           VALUES (?, ?, 'reason', ?)
+           ON CONFLICT(visitor_id) DO UPDATE SET
+             order_id = excluded.order_id,
+             step = 'reason',
+             reason = NULL,
+             item_intact = 0,
+             accessories_complete = 0,
+             original_packaging = 0,
+             gift_complete = 0,
+             confirmation_id = NULL,
+             expires_at = NULL,
+             updated_at = excluded.updated_at`
+        ).run(input.visitorId, input.orderId, input.now);
+
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
     },
 
     findFlow(visitorId) {

@@ -203,6 +203,12 @@ describe('POST /api/demo/session 领取示例订单', () => {
       replacePreview() {
         throw new Error('db down');
       },
+      findExchangeApplication() {
+        return null;
+      },
+      confirmExchange() {
+        throw new Error('db down');
+      },
       close() {
         // 注入的替身由测试持有。
       }

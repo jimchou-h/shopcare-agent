@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import {
+  exchangeConfirmResponseSchema,
   exchangeErrorResponseSchema,
   exchangePreviewResponseSchema,
   type ExchangeApplication,
@@ -98,6 +99,7 @@ export function ExchangePanel({
   const [reason, setReason] = useState<ExchangeReason>('quality');
   const [declaration, setDeclaration] = useState<ExchangeDeclaration>(EMPTY_DECLARATION);
   const [lastPreview, setLastPreview] = useState<ExchangePreviewRequest | null>(null);
+  const [lastConfirmationId, setLastConfirmationId] = useState<string | null>(null);
 
   async function requestPreview(payload: ExchangePreviewRequest) {
     setState({ kind: 'pending', action: 'preview' });
@@ -147,6 +149,39 @@ export function ExchangePanel({
     };
     setLastPreview(payload);
     void requestPreview(payload);
+  }
+
+  /** 确认只发送摘要标识；原因与申报已由服务端摘要保存。 */
+  async function requestConfirm(confirmationId: string) {
+    setLastConfirmationId(confirmationId);
+    setState({ kind: 'pending', action: 'confirm' });
+    try {
+      const response = await fetch('/api/exchange/confirm', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmationId })
+      });
+      if (!response.ok) {
+        throw new ExchangeRequestError(await readErrorMessage(response));
+      }
+
+      const parsed = exchangeConfirmResponseSchema.parse(await response.json());
+      if (parsed.outcome === 'submitted') {
+        setState({ kind: 'submitted', application: parsed.application });
+        return;
+      }
+      if (parsed.outcome === 'ineligible') {
+        setState({ kind: 'ineligible', message: parsed.message, sources: parsed.sources });
+        return;
+      }
+      setState({ kind: 'notice', message: parsed.message });
+    } catch (error) {
+      setState({
+        kind: 'failed',
+        action: 'confirm',
+        message: error instanceof ExchangeRequestError ? error.message : DEFAULT_FAILURE_MESSAGE
+      });
+    }
   }
 
   function toggleDeclaration(field: keyof ExchangeDeclaration) {
@@ -246,6 +281,13 @@ export function ExchangePanel({
           <SourceList sources={state.summary.sources} />
           <div className="exchange__actions">
             <button
+              className="ask__submit"
+              type="button"
+              onClick={() => void requestConfirm(state.confirmationId)}
+            >
+              确认提交
+            </button>
+            <button
               className="retry"
               type="button"
               onClick={() => setState({ kind: 'form' })}
@@ -285,6 +327,8 @@ export function ExchangePanel({
             onClick={() => {
               if (state.action === 'preview' && lastPreview) {
                 void requestPreview(lastPreview);
+              } else if (state.action === 'confirm' && lastConfirmationId) {
+                void requestConfirm(lastConfirmationId);
               } else {
                 setState({ kind: 'form' });
               }

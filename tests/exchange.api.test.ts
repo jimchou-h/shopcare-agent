@@ -391,6 +391,223 @@ describe('POST /api/exchange/preview 核对换货资格', () => {
   });
 });
 
+describe('POST /api/exchange/confirm 确认提交换货申请', () => {
+  async function previewConfirmation(
+    harness: Harness,
+    cookie: string,
+    orderId: string
+  ): Promise<string> {
+    const response = await harness.preview(
+      { orderId, reason: 'quality', declaration: ALL_DECLARED },
+      { cookie }
+    );
+    expect(response.json()).toMatchObject({ outcome: 'eligible' });
+    return response.json().confirmationId as string;
+  }
+
+  it('确认有效摘要后返回申请编号与已提交状态', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      const confirmationId = await previewConfirmation(harness, cookie, orderId);
+
+      const response = await harness.confirm({ confirmationId }, { cookie });
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body).toMatchObject({
+        status: 'exchange_application',
+        outcome: 'submitted',
+        application: { status: 'submitted' }
+      });
+      expect(body.application.applicationId).toMatch(/^EX-[A-Z0-9]{12}$/);
+
+      const rows = harness.readAll<{ confirmation_id: string; status: string }>(
+        'SELECT confirmation_id, status FROM exchange_applications'
+      );
+      expect(rows).toEqual([
+        { confirmation_id: confirmationId, status: 'submitted' }
+      ]);
+    });
+  });
+
+  it('重复提交同一确认返回同一申请编号，数据库只有一笔申请', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      const confirmationId = await previewConfirmation(harness, cookie, orderId);
+
+      const first = await harness.confirm({ confirmationId }, { cookie });
+      const second = await harness.confirm({ confirmationId }, { cookie });
+
+      expect(second.json()).toEqual(first.json());
+      expect(harness.readAll('SELECT * FROM exchange_applications')).toHaveLength(1);
+    });
+  });
+
+  it('并发提交同一确认只创建一笔申请', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      const confirmationId = await previewConfirmation(harness, cookie, orderId);
+
+      const responses = await Promise.all(
+        Array.from({ length: 5 }, () => harness.confirm({ confirmationId }, { cookie }))
+      );
+      const applicationIds = responses.map(
+        (response) => response.json().application.applicationId as string
+      );
+
+      expect(new Set(applicationIds).size).toBe(1);
+      expect(harness.readAll('SELECT * FROM exchange_applications')).toHaveLength(1);
+    });
+  });
+
+  it('过期摘要被拒绝且不写入申请', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      const confirmationId = await previewConfirmation(harness, cookie, orderId);
+
+      harness.advance(10 * 60 * 1000 + 1);
+      const response = await harness.confirm({ confirmationId }, { cookie });
+
+      expect(response.json()).toMatchObject({
+        status: 'exchange_application',
+        outcome: 'expired'
+      });
+      expect(response.json().message).toContain('重新核对');
+      expect(harness.readAll('SELECT * FROM exchange_applications')).toEqual([]);
+    });
+  });
+
+  it('被替换的摘要不能提交，最新摘要可以提交', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      const payload = { orderId, reason: 'quality', declaration: ALL_DECLARED };
+      const oldConfirmation = (await harness.preview(payload, { cookie })).json()
+        .confirmationId as string;
+      const latestConfirmation = (await harness.preview(payload, { cookie })).json()
+        .confirmationId as string;
+
+      const stale = await harness.confirm({ confirmationId: oldConfirmation }, { cookie });
+      expect(stale.json()).toMatchObject({
+        status: 'exchange_application',
+        outcome: 'superseded'
+      });
+      expect(harness.readAll('SELECT * FROM exchange_applications')).toEqual([]);
+
+      const latest = await harness.confirm({ confirmationId: latestConfirmation }, { cookie });
+      expect(latest.json()).toMatchObject({ outcome: 'submitted' });
+    });
+  });
+
+  it('预览后越过期限时确认返回逾期原因且不写入申请', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      // 签收于第 7 天 23:55（上海）且预览成功，5 分钟后进入第 8 天。
+      harness.updateSignedAt(orderId, Date.UTC(2026, 10, 19, 2, 0, 0));
+      harness.setNow(Date.UTC(2026, 10, 25, 15, 55, 0));
+      const confirmationId = await previewConfirmation(harness, cookie, orderId);
+
+      harness.advance(5 * 60 * 1000);
+      const response = await harness.confirm({ confirmationId }, { cookie });
+
+      expect(response.json()).toMatchObject({
+        status: 'exchange_application',
+        outcome: 'ineligible',
+        reason: 'overdue'
+      });
+      expect(response.json().sources.map((source: { id: string }) => source.id)).toEqual([
+        'faq-exchange-window'
+      ]);
+      expect(harness.readAll('SELECT * FROM exchange_applications')).toEqual([]);
+    });
+  });
+
+  it('跨来源确认被拒绝且不消耗摘要', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      const confirmationId = await previewConfirmation(harness, cookie, orderId);
+
+      const rejected = await harness.confirm(
+        { confirmationId },
+        { cookie, origin: 'https://evil.example' }
+      );
+      expect(rejected.statusCode).toBe(403);
+      expect(harness.readAll('SELECT * FROM exchange_applications')).toEqual([]);
+
+      const accepted = await harness.confirm({ confirmationId }, { cookie });
+      expect(accepted.json()).toMatchObject({ outcome: 'submitted' });
+    });
+  });
+
+  it('没有会话或使用其他访客的摘要都无法创建申请', async () => {
+    await withHarness(async (harness) => {
+      const visitorA = await harness.claim();
+      const visitorB = await harness.claim();
+      const confirmationId = await previewConfirmation(
+        harness,
+        visitorA.cookie,
+        visitorA.orderId
+      );
+
+      const anonymous = await harness.confirm({ confirmationId });
+      expect(anonymous.json()).toMatchObject({
+        status: 'exchange_application',
+        outcome: 'session_required',
+        message: '请先领取示例订单，再申请换货。'
+      });
+
+      const foreign = await harness.confirm(
+        { confirmationId },
+        { cookie: visitorB.cookie }
+      );
+      expect(foreign.json()).toMatchObject({
+        status: 'exchange_application',
+        outcome: 'invalid_confirmation'
+      });
+      expect(harness.readAll('SELECT * FROM exchange_applications')).toEqual([]);
+
+      // 原访客的摘要未被消耗，仍可正常提交。
+      const owner = await harness.confirm({ confirmationId }, { cookie: visitorA.cookie });
+      expect(owner.json()).toMatchObject({ outcome: 'submitted' });
+    });
+  });
+
+  it('无效确认标识与非法请求体得到稳定结果', async () => {
+    await withHarness(async (harness) => {
+      const { cookie } = await harness.claim();
+
+      const unknown = await harness.confirm(
+        { confirmationId: 'unknown-confirmation-id-1234' },
+        { cookie }
+      );
+      expect(unknown.json()).toMatchObject({
+        status: 'exchange_application',
+        outcome: 'invalid_confirmation'
+      });
+
+      const invalid = await harness.confirm({}, { cookie });
+      expect(invalid.statusCode).toBe(400);
+      expect(invalid.json()).toMatchObject({ status: 'invalid_request' });
+    });
+  });
+
+  it('同一订单已有申请时再次预览直接返回原回执', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      const confirmationId = await previewConfirmation(harness, cookie, orderId);
+      const submitted = await harness.confirm({ confirmationId }, { cookie });
+
+      const preview = await harness.preview(
+        { orderId, reason: 'other', declaration: ALL_DECLARED },
+        { cookie }
+      );
+      expect(preview.json()).toEqual({
+        status: 'exchange_preview',
+        outcome: 'already_submitted',
+        application: submitted.json().application
+      });
+    });
+  });
+});
+
 describe('升级前已有的演示订单', () => {
   it('迁移补齐签收时间后，原会话仍可进入换货预览', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'shopcare-legacy-'));

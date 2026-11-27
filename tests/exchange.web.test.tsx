@@ -74,7 +74,14 @@ function jsonResponse(body: unknown) {
 
 interface FetchRoutes {
   preview: (body: Record<string, unknown>) => unknown | Promise<unknown>;
+  confirm?: (body: Record<string, unknown>) => unknown | Promise<unknown>;
 }
+
+const submittedResponse = {
+  status: 'exchange_application',
+  outcome: 'submitted',
+  application: { applicationId: 'EX-AB12CD34EF56', status: 'submitted' }
+} as const;
 
 function mockFetch(routes: FetchRoutes) {
   return vi.fn(async (url: string, init?: RequestInit) => {
@@ -87,6 +94,13 @@ function mockFetch(routes: FetchRoutes) {
     if (url === '/api/exchange/preview') {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       return jsonResponse(await routes.preview(body));
+    }
+    if (url === '/api/exchange/confirm') {
+      if (!routes.confirm) {
+        throw new Error('测试未配置确认响应');
+      }
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      return jsonResponse(await routes.confirm(body));
     }
     throw new Error(`未预期的请求：${url}`);
   });
@@ -226,5 +240,110 @@ describe('顾客在订单卡片申请换货', () => {
     const previewCalls = fetchMock.mock.calls.filter(([url]) => url === '/api/exchange/preview');
     expect(previewCalls).toHaveLength(2);
     expect(previewCalls[0]?.[1]?.body).toBe(previewCalls[1]?.[1]?.body);
+  });
+
+  it('确认提交后展示申请编号与已提交状态', async () => {
+    const fetchMock = mockFetch({
+      preview: () => eligiblePreview,
+      confirm: () => submittedResponse
+    });
+    const user = await openOrderCard(fetchMock);
+
+    await user.click(screen.getByRole('button', { name: '申请换货' }));
+    await fillDeclaration(user);
+    await user.click(screen.getByRole('button', { name: '预览换货' }));
+    await screen.findByTestId('exchange-summary');
+
+    await user.click(screen.getByRole('button', { name: '确认提交' }));
+
+    expect(await screen.findByTestId('exchange-receipt')).toHaveTextContent('已提交');
+    expect(screen.getByTestId('exchange-application-id')).toHaveTextContent('EX-AB12CD34EF56');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/exchange/confirm',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ confirmationId: eligiblePreview.confirmationId })
+      })
+    );
+  });
+
+  it('确认失败后重试原确认并得到申请编号', async () => {
+    let attempts = 0;
+    const fetchMock = mockFetch({
+      preview: () => eligiblePreview,
+      confirm: () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new TypeError('network down');
+        }
+        return submittedResponse;
+      }
+    });
+    const user = await openOrderCard(fetchMock);
+
+    await user.click(screen.getByRole('button', { name: '申请换货' }));
+    await fillDeclaration(user);
+    await user.click(screen.getByRole('button', { name: '预览换货' }));
+    await screen.findByTestId('exchange-summary');
+    await user.click(screen.getByRole('button', { name: '确认提交' }));
+
+    expect(await screen.findByTestId('exchange-failed')).toHaveTextContent('请稍后重试');
+
+    await user.click(screen.getByRole('button', { name: '重试' }));
+    expect(await screen.findByTestId('exchange-application-id')).toHaveTextContent(
+      'EX-AB12CD34EF56'
+    );
+
+    const confirmCalls = fetchMock.mock.calls.filter(([url]) => url === '/api/exchange/confirm');
+    expect(confirmCalls).toHaveLength(2);
+    expect(confirmCalls[0]?.[1]?.body).toBe(
+      JSON.stringify({ confirmationId: eligiblePreview.confirmationId })
+    );
+    expect(confirmCalls[1]?.[1]?.body).toBe(confirmCalls[0]?.[1]?.body);
+  });
+
+  it('确认时已不符合资格则展示原因并引导重新核对', async () => {
+    const ineligibleConfirm = {
+      status: 'exchange_application',
+      outcome: 'ineligible',
+      reason: 'overdue',
+      message: '该订单已超过签收后 7 天的换货申请期限。',
+      sources: [windowSource]
+    } as const;
+    const fetchMock = mockFetch({
+      preview: () => eligiblePreview,
+      confirm: () => ineligibleConfirm
+    });
+    const user = await openOrderCard(fetchMock);
+
+    await user.click(screen.getByRole('button', { name: '申请换货' }));
+    await fillDeclaration(user);
+    await user.click(screen.getByRole('button', { name: '预览换货' }));
+    await screen.findByTestId('exchange-summary');
+    await user.click(screen.getByRole('button', { name: '确认提交' }));
+
+    expect(await screen.findByTestId('exchange-ineligible')).toHaveTextContent('7 天');
+    expect(screen.getByText('换货申请期限')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新核对' })).toBeInTheDocument();
+    expect(screen.queryByTestId('exchange-application-id')).not.toBeInTheDocument();
+  });
+
+  it('预览时已有申请则直接展示原回执', async () => {
+    const alreadySubmitted: ExchangePreviewResponse = {
+      status: 'exchange_preview',
+      outcome: 'already_submitted',
+      application: { applicationId: 'EX-AB12CD34EF56', status: 'submitted' }
+    };
+    const fetchMock = mockFetch({ preview: () => alreadySubmitted });
+    const user = await openOrderCard(fetchMock);
+
+    await user.click(screen.getByRole('button', { name: '申请换货' }));
+    await fillDeclaration(user);
+    await user.click(screen.getByRole('button', { name: '预览换货' }));
+
+    expect(await screen.findByTestId('exchange-application-id')).toHaveTextContent(
+      'EX-AB12CD34EF56'
+    );
+    expect(screen.queryByRole('button', { name: '申请换货' })).not.toBeInTheDocument();
   });
 });

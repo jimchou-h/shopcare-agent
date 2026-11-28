@@ -11,6 +11,7 @@ import { findEvidenceCandidates } from '../faq/candidates.js';
 import { FAQ_CORPUS, type FaqEntry } from '../faq/corpus.js';
 import { retrieveFaq } from '../faq/retrieve.js';
 import { validateGeneration } from './validate-generation.js';
+import { redactPii } from '../guardrails/redact.js';
 
 /** 上游不可用且无法降级时，由路由转换为受控的错误响应。 */
 export class ChatUpstreamError extends Error {
@@ -85,8 +86,9 @@ export async function answerChatQuestion(
   }
 
   try {
+    // 检索与证据判断用原始问题；只有构造模型请求时才脱敏个人信息。
     const generation = await deps.generate.generate({
-      question,
+      question: redactPii(question),
       candidates: evidence.map(toEvidenceCandidate)
     });
 
@@ -101,7 +103,8 @@ export async function answerChatQuestion(
 
     return {
       status: 'answered',
-      answer: validation.answer,
+      // 结构、引用与政策事实校验通过后才遮盖正文；出处是固定语料字段，不受影响。
+      answer: redactPii(validation.answer),
       source: validation.source,
       mode: 'generated'
     };

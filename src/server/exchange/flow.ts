@@ -31,19 +31,40 @@ export interface ExchangeFlowDeps {
 
 const REASON_OPTIONS = ['质量问题', '其他原因'];
 const DECLARATION_OPTIONS = ['齐全', '不齐全'];
-const START_PHRASES = ['我想换货', '我要换货', '申请换货', '办理换货', '开始换货', '换货申请'];
 const CONFIRM_TEXTS = new Set(['确认', '确定', '确认提交', '提交']);
 
 /**
- * 否定指令：否定词紧邻取消、继续、开始等动作时不执行，按当前步骤处理。
+ * 整句命令白名单：只有整句就是命令（可带礼貌前后缀）时才执行动作。
  *
- * 保留短距离匹配，避免「不要担心，继续换货」这类句子被整体当作否定。
+ * 句中含否定、疑问、条件或描述时不在这里匹配，交给当前步骤或问答处理，
+ * 因此不需要维护否定词表。
  */
-const NEGATED_INSTRUCTION =
-  /(?:不要|不想|不用|不必|不需要|别|勿|无需)[^，。！？,.!?]{0,3}(?:取消|继续|恢复|开始|办理|换货)/;
+const COMMAND_INTENTS = new Map<string, Intent>([
+  ['取消换货', 'cancel'],
+  ['取消本次换货', 'cancel'],
+  ['取消', 'cancel'],
+  ['不换了', 'cancel'],
+  ['继续换货', 'resume'],
+  ['继续办理换货', 'resume'],
+  ['继续', 'resume'],
+  ['我想换货', 'start'],
+  ['我要换货', 'start'],
+  ['申请换货', 'start'],
+  ['办理换货', 'start'],
+  ['开始换货', 'start'],
+  ['换货申请', 'start']
+]);
 
-function isNegatedInstruction(text: string): boolean {
-  return NEGATED_INSTRUCTION.test(text);
+const COMMAND_PREFIX =
+  /^(?:请帮我|帮我|请你|请|麻烦你|麻烦|我想|我要|我想要|想要)/;
+
+/** 去掉句末标点和礼貌结束语，保留问号由疑问判断先行处理。 */
+function normalizeCommandText(text: string): string {
+  return text
+    .trim()
+    .replace(/[。！!]+$/g, '')
+    .replace(/[，,\s]*(?:谢谢|多谢|麻烦了|辛苦了)$/g, '')
+    .trim();
 }
 
 const INELIGIBLE_MESSAGES: Record<ExchangeIneligibleReason, string> = {
@@ -65,24 +86,23 @@ function isQuestionLike(question: string): boolean {
 function detectIntent(question: string): Intent {
   const text = question.trim();
 
-  // 疑问说法是政策咨询，否定指令不执行动作；两者都按当前步骤或 FAQ 处理。
-  if (isQuestionLike(text) || isNegatedInstruction(text)) {
+  // 疑问说法是政策咨询，最后再按整句命令白名单识别动作。
+  if (isQuestionLike(text)) {
     return null;
   }
 
-  if (/取消(本次)?换货/.test(text) || text === '取消' || text === '不换了') {
-    return 'cancel';
-  }
-  if (/继续(办理)?换货/.test(text) || text === '继续') {
-    return 'resume';
-  }
-  if (CONFIRM_TEXTS.has(text)) {
+  const command = normalizeCommandText(text);
+  if (CONFIRM_TEXTS.has(command)) {
     return 'confirm';
   }
-  if (START_PHRASES.some((phrase) => text.includes(phrase))) {
-    return 'start';
+
+  const direct = COMMAND_INTENTS.get(command);
+  if (direct) {
+    return direct;
   }
-  return null;
+
+  // 只允许礼貌前缀剥离；句中出现否定、条件或描述时无法还原成白名单命令。
+  return COMMAND_INTENTS.get(command.replace(COMMAND_PREFIX, '')) ?? null;
 }
 
 /** 只把顾客明确表达的选项映射为结构化原因，其余内容留给 FAQ 或重问。 */
@@ -405,17 +425,15 @@ function completeDeclaration(
   });
 }
 
-/** 交互标识不匹配时只重新提示当前步骤，绝不推进；同时更换标识使旧按钮继续失效。 */
+/** 交互标识不匹配时只重新提示当前步骤并回传仍有效的标识，不轮换、不推进。 */
 function repromptCurrent(flow: FlowRecord, deps: ExchangeFlowDeps): ChatResponse {
   if (flow.step === 'confirmation') {
     return summaryFromFlow(flow, flow.visitorId, deps) ?? notice(EXCHANGE_FLOW_MESSAGES.confirmHint);
   }
   if (flow.step === 'reason' || !flow.reason) {
-    const interactionId = deps.repository.rotateFlowInteraction(flow.visitorId, deps.now) ?? '';
-    return reasonStep(flow.orderId, interactionId);
+    return reasonStep(flow.orderId, ensureInteraction(flow, deps));
   }
-  const interactionId = deps.repository.rotateFlowInteraction(flow.visitorId, deps.now) ?? '';
-  return declarationUnknownStep(flow.orderId, flow.reason, interactionId);
+  return declarationUnknownStep(flow.orderId, flow.reason, ensureInteraction(flow, deps));
 }
 
 /**
@@ -496,7 +514,6 @@ export function handleExchangeFlow(
     return null;
   }
 
-  const negated = isNegatedInstruction(question);
   const intent = detectIntent(question);
 
   if (intent === 'start') {
@@ -570,17 +587,7 @@ export function handleExchangeFlow(
     return null;
   }
 
-  // 否定指令不执行取消、恢复或开始，按当前步骤重新提示。
-  if (negated) {
-    if (flow.step === 'confirmation') {
-      const summary = summaryFromFlow(flow, session.visitorId, deps);
-      if (summary) {
-        return summary;
-      }
-    }
-    return stepResponse(flow, deps);
-  }
-
+  // 非命令句子按当前步骤或问答处理；这里不执行任何取消、恢复或开始动作。
   // 办理期间缺单号的查单会与商品申报争抢下一轮输入，要求先完成或取消换货。
   if (hasOrderQueryPhrase(question) && !containsOrderToken(question)) {
     return notice(EXCHANGE_FLOW_MESSAGES.orderQueryConflict);

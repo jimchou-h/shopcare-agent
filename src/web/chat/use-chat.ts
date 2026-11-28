@@ -2,14 +2,26 @@ import { useEffect, useRef, useState } from 'react';
 import {
   chatErrorResponseSchema,
   chatResponseSchema,
-  type ChatResponse
+  type ChatResponse,
+  type ExchangeFlowAction
 } from '../../shared/chat';
 
-/** 会话区按消息顺序展示；失败消息保留原问题，便于只重试这一轮。 */
+/** 一次请求要么是文本问题，要么是绑定当前步骤的结构化动作。 */
+export type ChatRequestPayload =
+  | { question: string }
+  | { action: ExchangeFlowAction };
+
+/** 会话区按消息顺序展示；失败消息保留原请求，便于只重试这一轮。 */
 export type ChatMessage =
   | { id: number; role: 'user'; text: string }
   | { id: number; role: 'assistant'; question: string; response: ChatResponse }
-  | { id: number; role: 'failure'; question: string; message: string };
+  | {
+      id: number;
+      role: 'failure';
+      question: string;
+      payload: ChatRequestPayload;
+      message: string;
+    };
 
 export type ChatStatus = 'idle' | 'invalid' | 'pending';
 
@@ -28,8 +40,12 @@ export function useChat() {
 
   useEffect(() => () => activeRequest.current?.abort(), []);
 
-  async function ask(question: string, options: { appendUser: boolean }) {
-    const submittedQuestion = question.trim();
+  async function ask(
+    payload: ChatRequestPayload,
+    display: string,
+    options: { appendUser: boolean }
+  ) {
+    const submittedQuestion = display.trim();
     if (!submittedQuestion) {
       setStatus('invalid');
       return;
@@ -50,7 +66,7 @@ export function useChat() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ question: submittedQuestion }),
+        body: JSON.stringify(payload),
         signal: controller.signal
       });
       if (!response.ok) {
@@ -87,6 +103,7 @@ export function useChat() {
             id,
             role: 'failure',
             question: submittedQuestion,
+            payload,
             message: error instanceof ChatRequestError ? error.message : DEFAULT_FAILURE_MESSAGE
           }
         ]);
@@ -105,11 +122,20 @@ export function useChat() {
     status,
     messages,
     submit() {
-      void ask(draft, { appendUser: true });
+      const question = draft.trim();
+      if (!question) {
+        setStatus('invalid');
+        return;
+      }
+      void ask({ question }, question, { appendUser: true });
     },
-    /** 快捷选项直接作为下一轮问题提交，不覆盖输入框中的草稿。 */
+    /** 文本快捷回复直接作为下一轮问题提交，不覆盖输入框中的草稿。 */
     send(question: string) {
-      void ask(question, { appendUser: true });
+      void ask({ question }, question, { appendUser: true });
+    },
+    /** 步骤按钮提交结构化动作；显示文本只用于会话记录。 */
+    sendAction(action: ExchangeFlowAction, label: string) {
+      void ask({ action }, label, { appendUser: true });
     },
     retry() {
       const failure = [...messages]
@@ -121,7 +147,7 @@ export function useChat() {
         return;
       }
       setMessages((current) => current.filter((message) => message.id !== failure.id));
-      void ask(failure.question, { appendUser: false });
+      void ask(failure.payload, failure.question, { appendUser: false });
     }
   };
 }

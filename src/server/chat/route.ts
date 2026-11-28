@@ -57,13 +57,25 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatRouteDeps): vo
     const currentTime = now();
 
     // 换货办理先于查单分发：办理期间的补问需要与查单互斥，且全程不进入模型。
-    const exchangeResult = handleExchangeFlow(parsed.data.question, {
-      repository: deps.repository,
-      tokenHash,
-      now: currentTime
-    });
+    const exchangeResult = handleExchangeFlow(
+      { question: parsed.data.question, action: parsed.data.action },
+      {
+        repository: deps.repository,
+        tokenHash,
+        now: currentTime
+      }
+    );
     if (exchangeResult) {
       return exchangeResult;
+    }
+
+    // 结构化动作由换货办理处理；到这里仍没有文本时不再进入问答。
+    if (!parsed.data.question) {
+      const error: ChatErrorResponse = {
+        status: 'invalid_request',
+        message: '请求格式不正确，请提供 question 字段。'
+      };
+      return reply.code(400).send(error);
     }
 
     // 查单先于 FAQ 和模型分发；命中后不再发起任何外部生成请求。

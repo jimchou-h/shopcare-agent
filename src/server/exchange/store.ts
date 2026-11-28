@@ -42,6 +42,8 @@ export interface ExchangeFlowRecord {
   step: ExchangeFlowStep;
   reason: ExchangeReason | null;
   declaration: ExchangeDeclaration;
+  /** 当前步骤的交互标识；为空表示迁移前的旧进度，恢复时会重新生成。 */
+  interactionId: string | null;
   confirmationId: string | null;
   expiresAt: number | null;
 }
@@ -78,12 +80,14 @@ export interface ExchangeStore {
    * 提交成功后清除该访客的办理进度。
    */
   confirmExchange(input: ConfirmExchangeInput): ConfirmExchangeResult;
-  /** 从原因步骤重新开始一段办理；已有进度会被重置，仍绑定当前访客的订单。 */
-  startFlow(input: StartExchangeFlowInput): void;
+  /** 从原因步骤重新开始一段办理；已有进度会被重置，返回新步骤的交互标识。 */
+  startFlow(input: StartExchangeFlowInput): string;
   /** 读取当前访客的办理进度；不存在时返回 null。 */
   findFlow(visitorId: string): ExchangeFlowRecord | null;
-  /** 记录换货原因并进入商品申报步骤。 */
-  setFlowReason(visitorId: string, reason: ExchangeReason, now: number): void;
+  /** 记录换货原因并进入商品申报步骤，返回申报步骤的新交互标识。 */
+  setFlowReason(visitorId: string, reason: ExchangeReason, now: number): string;
+  /** 为当前步骤生成新的交互标识；没有进度时返回 null。 */
+  rotateFlowInteraction(visitorId: string, now: number): string | null;
   /** 保存商品申报；步骤保持为申报，直到生成摘要。 */
   setFlowDeclaration(
     visitorId: string,
@@ -119,6 +123,11 @@ function createApplicationId(): string {
   return `EX-${suffix}`;
 }
 
+/** 步骤交互标识只用于绑定按钮与本轮提问，不携带业务含义。 */
+function createInteractionId(): string {
+  return randomBytes(9).toString('base64url');
+}
+
 function toApplication(row: Record<string, unknown>): ExchangeApplicationRecord {
   return {
     applicationId: String(row.application_id),
@@ -142,6 +151,10 @@ function toFlow(row: Record<string, unknown>): ExchangeFlowRecord {
       row.confirmation_id === null || row.confirmation_id === undefined
         ? null
         : String(row.confirmation_id),
+    interactionId:
+      row.interaction_id === null || row.interaction_id === undefined
+        ? null
+        : String(row.interaction_id),
     expiresAt: row.expires_at === null || row.expires_at === undefined ? null : Number(row.expires_at)
   };
 }
@@ -179,7 +192,7 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
   const findFlowRow = db.prepare(`
     SELECT visitor_id, order_id, step, reason,
            item_intact, accessories_complete, original_packaging, gift_complete,
-           confirmation_id, expires_at
+           interaction_id, confirmation_id, expires_at
     FROM exchange_flows
     WHERE visitor_id = ?
   `);
@@ -356,6 +369,7 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
     },
 
     startFlow(input) {
+      const interactionId = createInteractionId();
       db.exec('BEGIN IMMEDIATE');
       try {
         // 重新发起即作废该访客尚未提交的摘要，避免旧确认沿用旧原因和运费条件提交。
@@ -367,8 +381,8 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
 
         // 同一访客重新发起时重置已有进度，但始终绑定当前会话的订单。
         db.prepare(
-          `INSERT INTO exchange_flows (visitor_id, order_id, step, updated_at)
-           VALUES (?, ?, 'reason', ?)
+          `INSERT INTO exchange_flows (visitor_id, order_id, step, interaction_id, updated_at)
+           VALUES (?, ?, 'reason', ?, ?)
            ON CONFLICT(visitor_id) DO UPDATE SET
              order_id = excluded.order_id,
              step = 'reason',
@@ -377,12 +391,14 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
              accessories_complete = 0,
              original_packaging = 0,
              gift_complete = 0,
+             interaction_id = excluded.interaction_id,
              confirmation_id = NULL,
              expires_at = NULL,
              updated_at = excluded.updated_at`
-        ).run(input.visitorId, input.orderId, input.now);
+        ).run(input.visitorId, input.orderId, interactionId, input.now);
 
         db.exec('COMMIT');
+        return interactionId;
       } catch (error) {
         db.exec('ROLLBACK');
         throw error;
@@ -395,12 +411,25 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
     },
 
     setFlowReason(visitorId, reason, now) {
+      const interactionId = createInteractionId();
       db.prepare(
         `UPDATE exchange_flows
-            SET step = 'declaration', reason = ?, confirmation_id = NULL,
-                expires_at = NULL, updated_at = ?
+            SET step = 'declaration', reason = ?, interaction_id = ?,
+                confirmation_id = NULL, expires_at = NULL, updated_at = ?
           WHERE visitor_id = ?`
-      ).run(reason, now, visitorId);
+      ).run(reason, interactionId, now, visitorId);
+      return interactionId;
+    },
+
+    rotateFlowInteraction(visitorId, now) {
+      if (!findFlowRow.get(visitorId)) {
+        return null;
+      }
+      const interactionId = createInteractionId();
+      db.prepare(
+        `UPDATE exchange_flows SET interaction_id = ?, updated_at = ? WHERE visitor_id = ?`
+      ).run(interactionId, now, visitorId);
+      return interactionId;
     },
 
     setFlowDeclaration(visitorId, declaration, now) {
@@ -420,11 +449,14 @@ export function createExchangeStore(db: DatabaseSync): ExchangeStore {
     },
 
     setFlowConfirmation(visitorId, confirmationId, expiresAt, now) {
+      // 进入确认步骤时更换交互标识，申报步骤的旧按钮随之失效。
+      const interactionId = createInteractionId();
       db.prepare(
         `UPDATE exchange_flows
-            SET step = 'confirmation', confirmation_id = ?, expires_at = ?, updated_at = ?
+            SET step = 'confirmation', confirmation_id = ?, expires_at = ?,
+                interaction_id = ?, updated_at = ?
           WHERE visitor_id = ?`
-      ).run(confirmationId, expiresAt, now, visitorId);
+      ).run(confirmationId, expiresAt, interactionId, now, visitorId);
     },
 
     clearFlow(visitorId) {

@@ -14,7 +14,7 @@ import {
   Tag,
   Typography
 } from 'antd';
-import type { ChatMode, ChatResponse } from '../shared/chat';
+import type { ChatMode, ChatResponse, ExchangeFlowAction } from '../shared/chat';
 import { useChat } from './chat/use-chat';
 import { useDemoSession } from './demo-session/use-demo-session';
 import {
@@ -49,28 +49,58 @@ type ExchangeFlow = Extract<ChatResponse, { status: 'exchange_flow' }>;
 function ExchangeFlowMessage({
   response,
   onSend,
+  onAction,
   onClaim,
   claimPending
 }: {
   response: ExchangeFlow;
   onSend: (question: string) => void;
+  onAction: (action: ExchangeFlowAction, label: string) => void;
   onClaim: () => void;
   claimPending: boolean;
 }) {
   switch (response.outcome) {
-    case 'step':
+    case 'step': {
+      const step = response;
+      // 按钮提交绑定本轮步骤的交互标识；标识缺失时才退回文本，兼容旧响应。
+      function selectOption(option: string) {
+        if (!step.interactionId) {
+          onSend(option);
+          return;
+        }
+        if (step.step === 'reason') {
+          onAction(
+            {
+              type: 'exchange_reason',
+              interactionId: step.interactionId,
+              value: option === '质量问题' ? 'quality' : 'other'
+            },
+            option
+          );
+          return;
+        }
+        onAction(
+          {
+            type: 'exchange_declaration',
+            interactionId: step.interactionId,
+            value: option === '齐全' ? 'complete' : 'incomplete'
+          },
+          option
+        );
+      }
+
       return (
         <Card size="small" data-testid="exchange-step">
           <Typography.Text type="secondary">换货办理 · 本地引导</Typography.Text>
           <Typography.Paragraph type="secondary" style={{ margin: '4px 0 8px' }}>
-            示例订单 · {response.orderId}
+            示例订单 · {step.orderId}
           </Typography.Paragraph>
           <Typography.Paragraph strong data-testid="exchange-step-message" style={{ marginBottom: 8 }}>
-            {response.message}
+            {step.message}
           </Typography.Paragraph>
           <Space wrap>
-            {response.options.map((option) => (
-              <Button key={option} size="small" onClick={() => onSend(option)}>
+            {step.options.map((option) => (
+              <Button key={option} size="small" onClick={() => selectOption(option)}>
                 {option}
               </Button>
             ))}
@@ -80,6 +110,7 @@ function ExchangeFlowMessage({
           </Typography.Paragraph>
         </Card>
       );
+    }
     case 'summary':
       return (
         <ExchangeSummaryCard
@@ -137,12 +168,14 @@ function AssistantMessage({
   question,
   response,
   onSend,
+  onAction,
   onClaim,
   claimPending
 }: {
   question: string;
   response: ChatResponse;
   onSend: (question: string) => void;
+  onAction: (action: ExchangeFlowAction, label: string) => void;
   onClaim: () => void;
   claimPending: boolean;
 }) {
@@ -247,6 +280,7 @@ function AssistantMessage({
     <ExchangeFlowMessage
       response={response}
       onSend={onSend}
+      onAction={onAction}
       onClaim={onClaim}
       claimPending={claimPending}
     />
@@ -284,7 +318,7 @@ function FailureMessage({
 }
 
 export function App() {
-  const { draft, setDraft, status, messages, submit, retry, send } = useChat();
+  const { draft, setDraft, status, messages, submit, retry, send, sendAction } = useChat();
   const demoSession = useDemoSession();
   const cspNonce = readCspNonce();
   const claimedOrder = demoSession.state.kind === 'claimed' ? demoSession.state.order : null;
@@ -384,6 +418,7 @@ export function App() {
                       question={message.question}
                       response={message.response}
                       onSend={send}
+                      onAction={sendAction}
                       onClaim={demoSession.claim}
                       claimPending={claimPending}
                     />

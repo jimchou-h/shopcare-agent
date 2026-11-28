@@ -43,6 +43,7 @@ const reasonStep: ChatResponse = {
   outcome: 'step',
   step: 'reason',
   orderId: demoOrder.orderId,
+  interactionId: 'interaction-reason-1',
   message: '请选择换货原因：回复「质量问题」或「其他原因」。',
   options: ['质量问题', '其他原因']
 };
@@ -52,6 +53,7 @@ const declarationStep: ChatResponse = {
   outcome: 'step',
   step: 'declaration',
   orderId: demoOrder.orderId,
+  interactionId: 'interaction-declaration-1',
   reason: 'quality',
   message: '已记录换货原因：质量问题。请选择商品现状：齐全或不齐全。',
   options: ['齐全', '不齐全']
@@ -168,6 +170,45 @@ describe('顾客在对话里办理换货', () => {
 
     expect(await screen.findByTestId('exchange-receipt')).toHaveTextContent('已提交');
     expect(screen.getByTestId('exchange-application-id')).toHaveTextContent('EX-AB12CD34EF56');
+  });
+
+  it('步骤按钮提交结构化动作并携带当前交互标识', async () => {
+    const fetchMock = mockConversation([reasonStep, declarationStep, summaryResponse]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: '领取示例订单' }));
+    await user.type(screen.getByLabelText('你的问题'), '我想换货');
+    await user.click(screen.getByRole('button', { name: '查询' }));
+    await screen.findByRole('button', { name: '质量问题' });
+    await user.click(screen.getByRole('button', { name: '质量问题' }));
+    await screen.findByRole('button', { name: '齐全' });
+    await user.click(screen.getByRole('button', { name: '齐全' }));
+    await screen.findByTestId('exchange-summary');
+
+    const bodies = fetchMock.mock.calls
+      .filter(([url]) => url === '/api/chat')
+      .map(([, init]) => JSON.parse(String(init?.body)));
+
+    // 文本输入仍走 question；步骤按钮只提交绑定标识的动作，不再发送选项文本。
+    expect(bodies[0]).toEqual({ question: '我想换货' });
+    expect(bodies[1]).toEqual({
+      action: {
+        type: 'exchange_reason',
+        interactionId: 'interaction-reason-1',
+        value: 'quality'
+      }
+    });
+    expect(bodies[2]).toEqual({
+      action: {
+        type: 'exchange_declaration',
+        interactionId: 'interaction-declaration-1',
+        value: 'complete'
+      }
+    });
+    expect(userMessageTexts()).toEqual(expect.arrayContaining(['质量问题', '齐全']));
   });
 
   it('等待确认时输入「确认」只显示按钮提示，不调用确认接口', async () => {

@@ -218,6 +218,9 @@ describe('POST /api/demo/session 领取示例订单', () => {
       setFlowReason() {
         throw new Error('db down');
       },
+      rotateFlowInteraction() {
+        throw new Error('db down');
+      },
       setFlowDeclaration() {
         throw new Error('db down');
       },

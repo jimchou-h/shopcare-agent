@@ -1,4 +1,8 @@
-import type { ChatResponse, ExchangeFlowResponse } from '../../shared/chat.js';
+import type {
+  ChatResponse,
+  ExchangeFlowAction,
+  ExchangeFlowResponse
+} from '../../shared/chat.js';
 import type {
   ExchangeDeclaration,
   ExchangeReason,
@@ -30,6 +34,18 @@ const DECLARATION_OPTIONS = ['齐全', '不齐全'];
 const START_PHRASES = ['我想换货', '我要换货', '申请换货', '办理换货', '开始换货', '换货申请'];
 const CONFIRM_TEXTS = new Set(['确认', '确定', '确认提交', '提交']);
 
+/**
+ * 否定指令：否定词紧邻取消、继续、开始等动作时不执行，按当前步骤处理。
+ *
+ * 保留短距离匹配，避免「不要担心，继续换货」这类句子被整体当作否定。
+ */
+const NEGATED_INSTRUCTION =
+  /(?:不要|不想|不用|不必|不需要|别|勿|无需)[^，。！？,.!?]{0,3}(?:取消|继续|恢复|开始|办理|换货)/;
+
+function isNegatedInstruction(text: string): boolean {
+  return NEGATED_INSTRUCTION.test(text);
+}
+
 const INELIGIBLE_MESSAGES: Record<ExchangeIneligibleReason, string> = {
   not_signed: EXCHANGE_MESSAGES.notSigned,
   overdue: EXCHANGE_MESSAGES.overdue,
@@ -49,8 +65,8 @@ function isQuestionLike(question: string): boolean {
 function detectIntent(question: string): Intent {
   const text = question.trim();
 
-  // 疑问说法是政策咨询，不能当作办理、恢复或取消指令。
-  if (isQuestionLike(text)) {
+  // 疑问说法是政策咨询，否定指令不执行动作；两者都按当前步骤或 FAQ 处理。
+  if (isQuestionLike(text) || isNegatedInstruction(text)) {
     return null;
   }
 
@@ -155,23 +171,29 @@ function parseDeclaration(question: string): ExchangeDeclaration | null {
   };
 }
 
-function reasonStep(orderId: string): ExchangeFlowResponse {
+function reasonStep(orderId: string, interactionId: string): ExchangeFlowResponse {
   return {
     status: 'exchange_flow',
     outcome: 'step',
     step: 'reason',
     orderId,
+    interactionId,
     message: EXCHANGE_FLOW_MESSAGES.reasonStep,
     options: REASON_OPTIONS
   };
 }
 
-function declarationStep(orderId: string, reason: ExchangeReason): ExchangeFlowResponse {
+function declarationStep(
+  orderId: string,
+  reason: ExchangeReason,
+  interactionId: string
+): ExchangeFlowResponse {
   return {
     status: 'exchange_flow',
     outcome: 'step',
     step: 'declaration',
     orderId,
+    interactionId,
     reason,
     message: `已记录换货原因：${exchangeReasonLabel(reason)}。${EXCHANGE_FLOW_MESSAGES.declarationStep}`,
     options: DECLARATION_OPTIONS
@@ -180,28 +202,39 @@ function declarationStep(orderId: string, reason: ExchangeReason): ExchangeFlowR
 
 function declarationUnknownStep(
   orderId: string,
-  reason: ExchangeReason
+  reason: ExchangeReason,
+  interactionId: string
 ): ExchangeFlowResponse {
   return {
     status: 'exchange_flow',
     outcome: 'step',
     step: 'declaration',
     orderId,
+    interactionId,
     reason,
     message: EXCHANGE_FLOW_MESSAGES.declarationUnknown,
     options: DECLARATION_OPTIONS
   };
 }
 
-function stepResponse(flow: {
-  orderId: string;
-  step: string;
-  reason: ExchangeReason | null;
-}): ExchangeFlowResponse {
+function stepResponse(
+  flow: {
+    visitorId: string;
+    orderId: string;
+    step: string;
+    reason: ExchangeReason | null;
+    interactionId: string | null;
+  },
+  deps: ExchangeFlowDeps,
+  interactionId?: string
+): ExchangeFlowResponse {
+  // 旧进度没有交互标识时补发一个，页面按钮随后可携带它提交。
+  const currentInteractionId =
+    interactionId ?? flow.interactionId ?? deps.repository.rotateFlowInteraction(flow.visitorId, deps.now) ?? '';
   if (flow.step === 'reason' || !flow.reason) {
-    return reasonStep(flow.orderId);
+    return reasonStep(flow.orderId, currentInteractionId);
   }
-  return declarationStep(flow.orderId, flow.reason);
+  return declarationStep(flow.orderId, flow.reason, currentInteractionId);
 }
 
 function summaryResponse(input: {
@@ -265,6 +298,177 @@ function ineligible(reason: ExchangeIneligibleReason): ExchangeFlowResponse {
   };
 }
 
+export interface ExchangeFlowRequest {
+  question?: string;
+  action?: ExchangeFlowAction;
+}
+
+interface ExchangeSession {
+  visitorId: string;
+  orderId: string;
+}
+
+type FlowRecord = NonNullable<ReturnType<DemoRepository['findFlow']>>;
+
+function ensureInteraction(flow: FlowRecord, deps: ExchangeFlowDeps): string {
+  return (
+    flow.interactionId ??
+    deps.repository.rotateFlowInteraction(flow.visitorId, deps.now) ??
+    ''
+  );
+}
+
+function summaryFromFlow(
+  flow: FlowRecord,
+  visitorId: string,
+  deps: ExchangeFlowDeps
+): ExchangeFlowResponse | null {
+  if (
+    flow.step !== 'confirmation' ||
+    !flow.reason ||
+    !flow.confirmationId ||
+    flow.expiresAt === null
+  ) {
+    return null;
+  }
+  const order = deps.repository.findOrder(visitorId, flow.orderId);
+  if (!order) {
+    return null;
+  }
+  return summaryResponse({
+    order,
+    reason: flow.reason,
+    confirmationId: flow.confirmationId,
+    expiresAt: flow.expiresAt
+  });
+}
+
+function declarationFromValue(value: 'complete' | 'incomplete'): ExchangeDeclaration {
+  const flag = value === 'complete';
+  return {
+    itemIntact: flag,
+    accessoriesComplete: flag,
+    originalPackaging: flag,
+    giftComplete: flag
+  };
+}
+
+/** 申报通过后生成摘要；文本与按钮两条入口共用同一资格与写入逻辑。 */
+function completeDeclaration(
+  flow: FlowRecord,
+  declaration: ExchangeDeclaration,
+  session: ExchangeSession,
+  deps: ExchangeFlowDeps
+): ChatResponse {
+  if (!flow.reason || !deps.tokenHash) {
+    return stepResponse(flow, deps);
+  }
+
+  const order = deps.repository.findOrder(session.visitorId, flow.orderId);
+  if (!order) {
+    deps.repository.cancelFlow(session.visitorId, deps.now);
+    return notice(EXCHANGE_MESSAGES.notFound);
+  }
+
+  const eligibility = evaluateExchangeEligibility({
+    signedAt: order.signedAt,
+    now: deps.now,
+    declaration
+  });
+  if (!eligibility.eligible) {
+    // 不满足条件时结束本次办理，顾客可重新发起并核对新的申报。
+    deps.repository.cancelFlow(session.visitorId, deps.now);
+    return ineligible(eligibility.reason);
+  }
+
+  deps.repository.setFlowDeclaration(session.visitorId, declaration, deps.now);
+  const preview = deps.repository.replacePreview({
+    tokenHash: deps.tokenHash,
+    visitorId: session.visitorId,
+    orderId: flow.orderId,
+    reason: flow.reason,
+    declaration,
+    now: deps.now
+  });
+  deps.repository.setFlowConfirmation(
+    session.visitorId,
+    preview.confirmationId,
+    preview.expiresAt,
+    deps.now
+  );
+
+  return summaryResponse({
+    order,
+    reason: flow.reason,
+    confirmationId: preview.confirmationId,
+    expiresAt: preview.expiresAt
+  });
+}
+
+/** 交互标识不匹配时只重新提示当前步骤，绝不推进；同时更换标识使旧按钮继续失效。 */
+function repromptCurrent(flow: FlowRecord, deps: ExchangeFlowDeps): ChatResponse {
+  if (flow.step === 'confirmation') {
+    return summaryFromFlow(flow, flow.visitorId, deps) ?? notice(EXCHANGE_FLOW_MESSAGES.confirmHint);
+  }
+  if (flow.step === 'reason' || !flow.reason) {
+    const interactionId = deps.repository.rotateFlowInteraction(flow.visitorId, deps.now) ?? '';
+    return reasonStep(flow.orderId, interactionId);
+  }
+  const interactionId = deps.repository.rotateFlowInteraction(flow.visitorId, deps.now) ?? '';
+  return declarationUnknownStep(flow.orderId, flow.reason, interactionId);
+}
+
+/**
+ * 处理按钮提交的结构化动作。
+ *
+ * 动作必须与当前步骤及交互标识同时匹配才推进；过期、跨轮、跨订单或乱序的
+ * 动作只返回当前步骤提示，不读取文本、不写摘要。
+ */
+function handleAction(
+  action: ExchangeFlowAction,
+  session: ExchangeSession | null,
+  deps: ExchangeFlowDeps
+): ChatResponse {
+  if (!session) {
+    return sessionRequired();
+  }
+
+  const application = deps.repository.findExchangeApplication(
+    session.visitorId,
+    session.orderId
+  );
+  if (application) {
+    deps.repository.clearFlow(session.visitorId);
+    return alreadySubmitted(application);
+  }
+
+  const flow = deps.repository.findFlow(session.visitorId);
+  if (!flow) {
+    return notice(EXCHANGE_FLOW_MESSAGES.noActiveFlow);
+  }
+
+  // 摘要已生成时重复点击同一按钮直接返回原摘要，不重复写入。
+  if (flow.step === 'confirmation') {
+    return summaryFromFlow(flow, session.visitorId, deps) ?? notice(EXCHANGE_FLOW_MESSAGES.confirmHint);
+  }
+
+  const tokenMatches =
+    flow.interactionId !== null && flow.interactionId === action.interactionId;
+
+  if (action.type === 'exchange_reason') {
+    if (flow.step !== 'reason' || !tokenMatches) {
+      return repromptCurrent(flow, deps);
+    }
+    const interactionId = deps.repository.setFlowReason(flow.visitorId, action.value, deps.now);
+    return declarationStep(flow.orderId, action.value, interactionId);
+  }
+
+  if (flow.step !== 'declaration' || !flow.reason || !tokenMatches) {
+    return repromptCurrent(flow, deps);
+  }
+  return completeDeclaration(flow, declarationFromValue(action.value), session, deps);
+}
+
 /**
  * 识别并推进一轮对话内的换货办理。
  *
@@ -275,13 +479,25 @@ function ineligible(reason: ExchangeIneligibleReason): ExchangeFlowResponse {
  * 需要先完成或取消换货，避免两个补问流程同时推进。
  */
 export function handleExchangeFlow(
-  question: string,
+  input: ExchangeFlowRequest,
   deps: ExchangeFlowDeps
 ): ChatResponse | null {
-  const intent = detectIntent(question);
+  const question = input.question ?? '';
   const session = deps.tokenHash
     ? deps.repository.findSession(deps.tokenHash, deps.now)
     : null;
+
+  // 结构化动作不看文本，完全由当前步骤与交互标识决定是否推进。
+  if (input.action) {
+    return handleAction(input.action, session, deps);
+  }
+
+  if (!question) {
+    return null;
+  }
+
+  const negated = isNegatedInstruction(question);
+  const intent = detectIntent(question);
 
   if (intent === 'start') {
     if (!session || !deps.tokenHash) {
@@ -300,12 +516,12 @@ export function handleExchangeFlow(
       return alreadySubmitted(application);
     }
 
-    deps.repository.startFlow({
+    const interactionId = deps.repository.startFlow({
       visitorId: session.visitorId,
       orderId: session.orderId,
       now: deps.now
     });
-    return reasonStep(session.orderId);
+    return reasonStep(session.orderId, interactionId);
   }
 
   if (intent === 'resume' || intent === 'cancel') {
@@ -332,23 +548,17 @@ export function handleExchangeFlow(
       return cancelled();
     }
 
-    if (
-      flow.step === 'confirmation' &&
-      flow.reason &&
-      flow.confirmationId &&
-      flow.expiresAt !== null
-    ) {
-      const order = deps.repository.findOrder(session.visitorId, flow.orderId);
-      if (order) {
-        return summaryResponse({
-          order,
-          reason: flow.reason,
-          confirmationId: flow.confirmationId,
-          expiresAt: flow.expiresAt
-        });
-      }
+    const summary = summaryFromFlow(flow, session.visitorId, deps);
+    if (summary) {
+      return summary;
     }
-    return stepResponse(flow);
+
+    // 恢复步骤时更换交互标识，刷新前留在页面上的旧按钮因此无法继续推进。
+    const interactionId = deps.repository.rotateFlowInteraction(
+      session.visitorId,
+      deps.now
+    );
+    return stepResponse(flow, deps, interactionId ?? undefined);
   }
 
   if (!session) {
@@ -358,6 +568,17 @@ export function handleExchangeFlow(
   const flow = deps.repository.findFlow(session.visitorId);
   if (!flow) {
     return null;
+  }
+
+  // 否定指令不执行取消、恢复或开始，按当前步骤重新提示。
+  if (negated) {
+    if (flow.step === 'confirmation') {
+      const summary = summaryFromFlow(flow, session.visitorId, deps);
+      if (summary) {
+        return summary;
+      }
+    }
+    return stepResponse(flow, deps);
   }
 
   // 办理期间缺单号的查单会与商品申报争抢下一轮输入，要求先完成或取消换货。
@@ -374,7 +595,7 @@ export function handleExchangeFlow(
     if (flow.step === 'confirmation') {
       return notice(EXCHANGE_FLOW_MESSAGES.confirmHint);
     }
-    return stepResponse(flow);
+    return stepResponse(flow, deps);
   }
 
   if (flow.step === 'reason') {
@@ -385,65 +606,28 @@ export function handleExchangeFlow(
         outcome: 'step',
         step: 'reason',
         orderId: flow.orderId,
+        interactionId: ensureInteraction(flow, deps),
         message: EXCHANGE_FLOW_MESSAGES.reasonUnknown,
         options: REASON_OPTIONS
       };
     }
-    deps.repository.setFlowReason(flow.visitorId, reason, deps.now);
-    return declarationStep(flow.orderId, reason);
+    const interactionId = deps.repository.setFlowReason(flow.visitorId, reason, deps.now);
+    return declarationStep(flow.orderId, reason, interactionId);
   }
 
   if (flow.step === 'declaration') {
     const declaration = parseDeclaration(question);
     if (!declaration) {
       if (!flow.reason) {
-        return reasonStep(flow.orderId);
+        return stepResponse(flow, deps);
       }
-      return declarationUnknownStep(flow.orderId, flow.reason);
+      return declarationUnknownStep(
+        flow.orderId,
+        flow.reason,
+        ensureInteraction(flow, deps)
+      );
     }
-    if (!flow.reason || !deps.tokenHash) {
-      return stepResponse(flow);
-    }
-
-    const order = deps.repository.findOrder(session.visitorId, flow.orderId);
-    if (!order) {
-      deps.repository.cancelFlow(session.visitorId, deps.now);
-      return notice(EXCHANGE_MESSAGES.notFound);
-    }
-
-    const eligibility = evaluateExchangeEligibility({
-      signedAt: order.signedAt,
-      now: deps.now,
-      declaration
-    });
-    if (!eligibility.eligible) {
-      // 不满足条件时结束本次办理，顾客可重新发起并核对新的申报。
-      deps.repository.cancelFlow(session.visitorId, deps.now);
-      return ineligible(eligibility.reason);
-    }
-
-    deps.repository.setFlowDeclaration(session.visitorId, declaration, deps.now);
-    const preview = deps.repository.replacePreview({
-      tokenHash: deps.tokenHash,
-      visitorId: session.visitorId,
-      orderId: flow.orderId,
-      reason: flow.reason,
-      declaration,
-      now: deps.now
-    });
-    deps.repository.setFlowConfirmation(
-      session.visitorId,
-      preview.confirmationId,
-      preview.expiresAt,
-      deps.now
-    );
-
-    return summaryResponse({
-      order,
-      reason: flow.reason,
-      confirmationId: preview.confirmationId,
-      expiresAt: preview.expiresAt
-    });
+    return completeDeclaration(flow, declaration, session, deps);
   }
 
   return notice(EXCHANGE_FLOW_MESSAGES.confirmHint);

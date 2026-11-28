@@ -26,6 +26,10 @@ interface Harness {
   databasePath: string;
   claim(): Promise<{ cookie: string; orderId: string }>;
   ask(question: string, headers?: Record<string, string | undefined>): Promise<LightMyRequestResponse>;
+  action(
+    action: unknown,
+    headers?: Record<string, string | undefined>
+  ): Promise<LightMyRequestResponse>;
   confirm(
     payload: unknown,
     headers?: Record<string, string | undefined>
@@ -84,6 +88,14 @@ function buildHarness(app: FastifyInstance, databasePath: string): Harness {
         url: '/api/chat',
         headers: headers(extra),
         payload: { question }
+      });
+    },
+    action(action, extra = {}) {
+      return app.inject({
+        method: 'POST',
+        url: '/api/chat',
+        headers: headers(extra),
+        payload: { action }
       });
     },
     confirm(payload, extra = {}) {
@@ -149,6 +161,18 @@ async function reachSummary(harness: Harness, cookie: string, orderId: string) {
   const summary = await harness.ask('齐全', { cookie });
   expect(summary.json()).toMatchObject({ outcome: 'summary' });
   return summary.json() as { confirmationId: string; summary: Record<string, unknown> };
+}
+
+/** 发起办理并进入商品申报，返回申报步骤的交互标识。 */
+async function reachDeclaration(harness: Harness, cookie: string): Promise<string> {
+  expect((await harness.ask('我想换货', { cookie })).json()).toMatchObject({
+    outcome: 'step',
+    step: 'reason'
+  });
+  const response = await harness.ask('质量问题', { cookie });
+  const body = response.json<{ step: string; interactionId: string }>();
+  expect(body.step).toBe('declaration');
+  return body.interactionId;
 }
 
 describe('POST /api/chat 在对话内办理换货', () => {
@@ -637,5 +661,267 @@ describe('POST /api/chat 在对话内办理换货', () => {
       },
       { rateLimit: { limit: 1, windowMs: 60_000 } }
     );
+  });
+});
+
+describe('换货办理的指令否定与按钮边界', () => {
+  it.each(['不要取消换货', '别取消', '不想取消换货', '不用取消换货'])(
+    '否定指令「%s」不结束办理',
+    async (text) => {
+      await withHarness(async (harness) => {
+        const { cookie } = await harness.claim();
+        const interactionId = await reachDeclaration(harness, cookie);
+
+        const response = await harness.ask(text, { cookie });
+        expect(response.json()).toMatchObject({
+          status: 'exchange_flow',
+          outcome: 'step',
+          step: 'declaration',
+          interactionId
+        });
+        expect(harness.readAll<{ step: string; reason: string }>(
+          'SELECT step, reason FROM exchange_flows'
+        )).toEqual([{ step: 'declaration', reason: 'quality' }]);
+        expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
+
+        // 当前按钮仍可完成本轮申报。
+        const summary = await harness.action(
+          { type: 'exchange_declaration', interactionId, value: 'complete' },
+          { cookie }
+        );
+        expect(summary.json()).toMatchObject({ outcome: 'summary' });
+      });
+    }
+  );
+
+  it('否定取消不会撤销待确认摘要', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      const summary = await reachSummary(harness, cookie, orderId);
+
+      const response = await harness.ask('不要取消换货', { cookie });
+      expect(response.json()).toMatchObject({
+        outcome: 'summary',
+        confirmationId: summary.confirmationId
+      });
+      expect(harness.readAll('SELECT * FROM exchange_flows')).toHaveLength(1);
+      expect(
+        harness.readAll<{ superseded_at: number | null }>(
+          'SELECT superseded_at FROM exchange_summaries'
+        )
+      ).toEqual([{ superseded_at: null }]);
+    });
+  });
+
+  it.each(['怎么取消换货', '取消换货吗', '能不能取消换货', '取消换货？'])(
+    '疑问说法「%s」不执行取消',
+    async (text) => {
+      await withHarness(async (harness) => {
+        const { cookie } = await harness.claim();
+        const interactionId = await reachDeclaration(harness, cookie);
+
+        const response = await harness.ask(text, { cookie });
+        expect(['answered', 'insufficient_evidence']).toContain(response.json().status);
+        expect(harness.readAll<{ step: string; reason: string }>(
+          'SELECT step, reason FROM exchange_flows'
+        )).toEqual([{ step: 'declaration', reason: 'quality' }]);
+        expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
+
+        const summary = await harness.action(
+          { type: 'exchange_declaration', interactionId, value: 'complete' },
+          { cookie }
+        );
+        expect(summary.json()).toMatchObject({ outcome: 'summary' });
+      });
+    }
+  );
+
+  it('取消并重开后，旧申报按钮不能推进新一轮', async () => {
+    await withHarness(async (harness) => {
+      const { cookie } = await harness.claim();
+      const oldInteractionId = await reachDeclaration(harness, cookie);
+
+      expect((await harness.ask('取消换货', { cookie })).json()).toMatchObject({
+        outcome: 'cancelled'
+      });
+      expect((await harness.ask('我想换货', { cookie })).json()).toMatchObject({
+        step: 'reason'
+      });
+      await harness.ask('其他原因', { cookie });
+
+      const stale = await harness.action(
+        { type: 'exchange_declaration', interactionId: oldInteractionId, value: 'complete' },
+        { cookie }
+      );
+      const staleBody = stale.json<{ step: string; interactionId: string }>();
+      expect(staleBody).toMatchObject({ outcome: 'step', step: 'declaration' });
+      expect(staleBody.interactionId).not.toBe(oldInteractionId);
+      expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
+      expect(harness.readAll<{ step: string; reason: string }>(
+        'SELECT step, reason FROM exchange_flows'
+      )).toEqual([{ step: 'declaration', reason: 'other' }]);
+
+      const summary = await harness.action(
+        { type: 'exchange_declaration', interactionId: staleBody.interactionId, value: 'complete' },
+        { cookie }
+      );
+      expect(summary.json()).toMatchObject({
+        outcome: 'summary',
+        summary: { reason: 'other' }
+      });
+    });
+  });
+
+  it('旧申报按钮不能跨访客或跨订单推进', async () => {
+    await withHarness(async (harness) => {
+      const first = await harness.claim();
+      const interactionId = await reachDeclaration(harness, first.cookie);
+
+      const second = await harness.claim();
+      const crossVisitor = await harness.action(
+        { type: 'exchange_declaration', interactionId, value: 'complete' },
+        { cookie: second.cookie }
+      );
+      expect(crossVisitor.json()).toMatchObject({
+        status: 'exchange_flow',
+        outcome: 'notice'
+      });
+      expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
+
+      // 原访客的进度和按钮仍然有效。
+      const summary = await harness.action(
+        { type: 'exchange_declaration', interactionId, value: 'complete' },
+        { cookie: first.cookie }
+      );
+      expect(summary.json()).toMatchObject({ outcome: 'summary' });
+    });
+  });
+
+  it('重复点击同一申报按钮返回同一摘要且只写入一次', async () => {
+    await withHarness(async (harness) => {
+      const { cookie } = await harness.claim();
+      const interactionId = await reachDeclaration(harness, cookie);
+      const action = { type: 'exchange_declaration', interactionId, value: 'complete' };
+
+      const first = await harness.action(action, { cookie });
+      const second = await harness.action(action, { cookie });
+      expect(first.json()).toMatchObject({ outcome: 'summary' });
+      expect(second.json()).toMatchObject({
+        outcome: 'summary',
+        confirmationId: first.json().confirmationId
+      });
+      expect(harness.readAll('SELECT * FROM exchange_summaries')).toHaveLength(1);
+      expect(harness.readAll('SELECT * FROM exchange_applications')).toEqual([]);
+    });
+  });
+
+  it('乱序提交步骤动作只重新提示当前步骤', async () => {
+    await withHarness(async (harness) => {
+      const { cookie } = await harness.claim();
+      const start = await harness.ask('我想换货', { cookie });
+      const reasonStepId = start.json<{ interactionId: string }>().interactionId;
+
+      const declarationAtReason = await harness.action(
+        { type: 'exchange_declaration', interactionId: reasonStepId, value: 'complete' },
+        { cookie }
+      );
+      expect(declarationAtReason.json()).toMatchObject({ outcome: 'step', step: 'reason' });
+      expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
+
+      const declaration = await harness.ask('质量问题', { cookie });
+      const declarationId = declaration.json<{ interactionId: string }>().interactionId;
+      const reasonAtDeclaration = await harness.action(
+        { type: 'exchange_reason', interactionId: declarationId, value: 'other' },
+        { cookie }
+      );
+      expect(reasonAtDeclaration.json()).toMatchObject({
+        outcome: 'step',
+        step: 'declaration',
+        reason: 'quality'
+      });
+      expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
+
+      // 乱序动作会更换交互标识，旧标识不能继续使用。
+      const stale = await harness.action(
+        { type: 'exchange_declaration', interactionId: declarationId, value: 'complete' },
+        { cookie }
+      );
+      const staleBody = stale.json<{ outcome: string; interactionId: string }>();
+      expect(staleBody).toMatchObject({ outcome: 'step', step: 'declaration' });
+
+      const summary = await harness.action(
+        { type: 'exchange_declaration', interactionId: staleBody.interactionId, value: 'complete' },
+        { cookie }
+      );
+      expect(summary.json()).toMatchObject({
+        outcome: 'summary',
+        summary: { reason: 'quality' }
+      });
+    });
+  });
+
+  it('刷新后旧申报按钮失效，新按钮仍可完成', async () => {
+    await withHarness(async (harness) => {
+      const { cookie } = await harness.claim();
+      const oldInteractionId = await reachDeclaration(harness, cookie);
+
+      const resumed = await harness.ask('继续换货', { cookie });
+      const resumedId = resumed.json<{ interactionId: string }>().interactionId;
+      expect(resumedId).not.toBe(oldInteractionId);
+
+      const stale = await harness.action(
+        { type: 'exchange_declaration', interactionId: oldInteractionId, value: 'complete' },
+        { cookie }
+      );
+      const staleBody = stale.json<{ outcome: string; interactionId: string }>();
+      expect(staleBody).toMatchObject({ outcome: 'step' });
+      expect(staleBody.interactionId).not.toBe(oldInteractionId);
+      expect(harness.readAll('SELECT * FROM exchange_summaries')).toEqual([]);
+
+      const summary = await harness.action(
+        { type: 'exchange_declaration', interactionId: staleBody.interactionId, value: 'complete' },
+        { cookie }
+      );
+      expect(summary.json()).toMatchObject({ outcome: 'summary' });
+    });
+  });
+
+  it('提交后旧申报按钮只返回已提交回执', async () => {
+    await withHarness(async (harness) => {
+      const { cookie, orderId } = await harness.claim();
+      const interactionId = await reachDeclaration(harness, cookie);
+      const summary = await harness.action(
+        { type: 'exchange_declaration', interactionId, value: 'complete' },
+        { cookie }
+      );
+      const confirmationId = summary.json<{ confirmationId: string }>().confirmationId;
+      expect(
+        (await harness.confirm({ confirmationId }, { cookie })).json()
+      ).toMatchObject({ outcome: 'submitted' });
+
+      const stale = await harness.action(
+        { type: 'exchange_declaration', interactionId, value: 'complete' },
+        { cookie }
+      );
+      expect(stale.json()).toMatchObject({
+        outcome: 'already_submitted',
+        application: { status: 'submitted' }
+      });
+      expect(harness.readAll('SELECT * FROM exchange_applications')).toHaveLength(1);
+    });
+  });
+
+  it('没有有效会话时结构化动作不推进', async () => {
+    await withHarness(async (harness) => {
+      const response = await harness.action({
+        type: 'exchange_declaration',
+        interactionId: 'unknown-interaction',
+        value: 'complete'
+      });
+      expect(response.json()).toMatchObject({
+        status: 'exchange_flow',
+        outcome: 'session_required'
+      });
+    });
   });
 });

@@ -10,13 +10,40 @@ import { demoOrderSchema } from './orders.js';
 
 export { faqSourceSchema };
 
-/** 问答接口的请求体。空白问题在入口处拒绝，避免绕过页面直接提交。 */
-export const chatRequestSchema = z.object({
-  question: z
-    .string({ required_error: '请输入售后问题。' })
-    .trim()
-    .min(1, { message: '请输入售后问题。' })
-});
+/**
+ * 换货步骤按钮提交的结构化动作。
+ *
+ * 动作携带当前步骤的交互标识，服务端据此确认按钮属于本轮提问；
+ * 过期按钮、跨轮或跨订单的标识不会推进办理。
+ */
+export const exchangeFlowActionSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('exchange_reason'),
+    interactionId: z.string().trim().min(1),
+    value: z.enum(['quality', 'other'])
+  }),
+  z.object({
+    type: z.literal('exchange_declaration'),
+    interactionId: z.string().trim().min(1),
+    value: z.enum(['complete', 'incomplete'])
+  })
+]);
+
+export type ExchangeFlowAction = z.infer<typeof exchangeFlowActionSchema>;
+
+/** 问答接口的请求体：文本问题或结构化换货动作，至少提供一项。 */
+export const chatRequestSchema = z
+  .object({
+    question: z
+      .string({ required_error: '请输入售后问题。' })
+      .trim()
+      .min(1, { message: '请输入售后问题。' })
+      .optional(),
+    action: exchangeFlowActionSchema.optional()
+  })
+  .refine((value) => value.question !== undefined || value.action !== undefined, {
+    message: '请输入售后问题。'
+  });
 
 /** 请求无法处理、生成服务不可用或来源不受信任时返回的稳定错误码，与业务结果区分。 */
 export const chatErrorResponseSchema = z.object({
@@ -83,6 +110,8 @@ const exchangeFlowStepSchema = z.object({
   outcome: z.literal('step'),
   step: z.enum(['reason', 'declaration']),
   orderId: z.string(),
+  /** 本轮步骤的交互标识；按钮提交时原样带回，服务端据此校验所属轮次。 */
+  interactionId: z.string(),
   message: z.string(),
   reason: exchangeReasonSchema.optional(),
   options: z.array(z.string())

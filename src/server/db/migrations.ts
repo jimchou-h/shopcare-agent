@@ -90,6 +90,14 @@ const MIGRATIONS: readonly Migration[] = [
         updated_at INTEGER NOT NULL
       ) STRICT;
     `
+  },
+  {
+    version: 4,
+    sql: `
+      -- 每轮步骤的交互标识：按钮提交时校验它仍对应当前待回答问题，
+      -- 避免旧轮次或跨订单的按钮推进新的办理。
+      ALTER TABLE exchange_flows ADD COLUMN interaction_id TEXT;
+    `
   }
 ];
 

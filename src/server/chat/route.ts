@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import {
   chatRequestSchema,
+  GUARDRAIL_BLOCKED_MESSAGE,
+  type ChatBlockedResponse,
   type ChatErrorResponse
 } from '../../shared/chat.js';
 import type { DeploymentMode } from '../config.js';
@@ -13,6 +15,7 @@ import { isTrustedSameOrigin } from '../http/same-origin.js';
 import { handleExchangeFlow } from '../exchange/flow.js';
 import { handleOrderQuestion } from '../orders/query.js';
 import { ChatUpstreamError, answerChatQuestion } from './answer-question.js';
+import { classifyInputGuardrail } from './input-guardrail.js';
 
 export interface ChatRouteDeps {
   mode: DeploymentMode;
@@ -49,6 +52,20 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatRouteDeps): vo
         message: parsed.error.issues[0]?.message ?? '请求格式不正确，请提供 question 字段。'
       };
       return reply.code(400).send(error);
+    }
+
+    // 文本护栏在读取或推进业务流程前校验。命中即返回稳定拦截结果，
+    // 不读取订单、不推进换货、不调用模型；结构化按钮动作不带 question，不受文本规则影响。
+    if (parsed.data.question) {
+      const reason = classifyInputGuardrail(parsed.data.question);
+      if (reason) {
+        const blocked: ChatBlockedResponse = {
+          status: 'blocked',
+          reason,
+          message: GUARDRAIL_BLOCKED_MESSAGE
+        };
+        return reply.code(200).send(blocked);
+      }
     }
 
     // 响应来源由服务端确定，浏览器提交的字段无法改变部署模式或开启新的调用路径。

@@ -53,6 +53,24 @@ export const chatErrorResponseSchema = z.object({
 
 export type ChatErrorResponse = z.infer<typeof chatErrorResponseSchema>;
 
+/**
+ * 护栏拦截的稳定原因。注入类改写系统指令，跑题类明显超出售后范围；
+ * 无法确定话题不拦截，继续走澄清路径。
+ */
+export const guardrailReasonSchema = z.enum(['prompt_injection', 'off_topic']);
+export type GuardrailReason = z.infer<typeof guardrailReasonSchema>;
+
+/** 拦截属于一次已处理的对话：HTTP 200 且给出可继续咨询的固定提示。 */
+export const GUARDRAIL_BLOCKED_MESSAGE = '我可以帮你查询订单、办理换货或解答售后政策。';
+
+export const chatBlockedResponseSchema = z.object({
+  status: z.literal('blocked'),
+  reason: guardrailReasonSchema,
+  message: z.string()
+});
+
+export type ChatBlockedResponse = z.infer<typeof chatBlockedResponseSchema>;
+
 /** 本轮实际采用的回答来源：预置、模型生成或上游失败后的预置降级。 */
 export const chatModeSchema = z.enum(['preset', 'generated', 'fallback']);
 
@@ -179,7 +197,8 @@ export const chatResponseSchema = z.union([
   answeredChatResponseSchema,
   insufficientEvidenceResponseSchema,
   orderQueryResponseSchema,
-  exchangeFlowResponseSchema
+  exchangeFlowResponseSchema,
+  chatBlockedResponseSchema
 ]);
 
 export type ChatResponse = z.infer<typeof chatResponseSchema>;

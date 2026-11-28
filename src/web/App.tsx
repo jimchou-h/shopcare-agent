@@ -222,6 +222,19 @@ function AssistantMessage({
     );
   }
 
+  if (response.status === 'blocked') {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        data-testid="guardrail-blocked"
+        title={
+          <span data-testid="guardrail-message">{response.message}</span>
+        }
+      />
+    );
+  }
+
   if (response.status === 'order_query') {
     if (response.outcome === 'found') {
       return (

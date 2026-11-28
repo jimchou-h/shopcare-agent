@@ -49,6 +49,7 @@ const COMMAND_INTENTS = new Map<string, Intent>([
   ['继续', 'resume'],
   ['我想换货', 'start'],
   ['我要换货', 'start'],
+  ['换货', 'start'],
   ['申请换货', 'start'],
   ['办理换货', 'start'],
   ['开始换货', 'start'],
@@ -58,13 +59,32 @@ const COMMAND_INTENTS = new Map<string, Intent>([
 const COMMAND_PREFIX =
   /^(?:请帮我|帮我|请你|请|麻烦你|麻烦|我想|我要|我想要|想要)/;
 
-/** 去掉句末标点和礼貌结束语，保留问号由疑问判断先行处理。 */
+/**
+ * 去掉句末标点、礼貌结束语和语气词，并把「申请一下换货」等口语填充归一。
+ *
+ * 问号由疑问判断先行处理，不会进入这里。
+ */
 function normalizeCommandText(text: string): string {
   return text
     .trim()
     .replace(/[。！!]+$/g, '')
     .replace(/[，,\s]*(?:谢谢|多谢|麻烦了|辛苦了)$/g, '')
+    .replace(/[吧啊呀哦嘛啦]+$/g, '')
+    .replace(/(申请|办理|开始|取消|继续|恢复)一下换货/g, '$1换货')
     .trim();
+}
+
+/** 允许连续礼貌前缀，例如「麻烦帮我取消换货」「请你帮我取消换货」。 */
+function stripCommandPrefixes(command: string): string {
+  let value = command;
+  for (let index = 0; index < 3; index += 1) {
+    const next = value.replace(COMMAND_PREFIX, '');
+    if (next === value) {
+      break;
+    }
+    value = next;
+  }
+  return value;
 }
 
 const INELIGIBLE_MESSAGES: Record<ExchangeIneligibleReason, string> = {
@@ -101,8 +121,8 @@ function detectIntent(question: string): Intent {
     return direct;
   }
 
-  // 只允许礼貌前缀剥离；句中出现否定、条件或描述时无法还原成白名单命令。
-  return COMMAND_INTENTS.get(command.replace(COMMAND_PREFIX, '')) ?? null;
+  // 只允许剥离连续礼貌前缀；句中含否定、条件或描述时无法还原成白名单命令。
+  return COMMAND_INTENTS.get(stripCommandPrefixes(command)) ?? null;
 }
 
 /** 只把顾客明确表达的选项映射为结构化原因，其余内容留给 FAQ 或重问。 */
